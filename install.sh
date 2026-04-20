@@ -172,7 +172,7 @@ purge_if_installed() {
 }
 
 remove_stack() {
-  echo "ВНИМАНИЕ: этот режим удаляет ChirpStack и Zabbix Agent2."
+  echo "ВНИМАНИЕ: этот режим удаляет выбранные компоненты."
   if ! ask_yes_no "Продолжить удаление?"; then
     echo "Удаление отменено."
     return 0
@@ -188,23 +188,32 @@ remove_stack() {
     mosquitto \
     redis-server 2>/dev/null || true
 
-  echo ">>> Удаляем пакеты ChirpStack и Zabbix Agent2"
-  local app_pkgs=(
-    chirpstack
-    chirpstack-network-server
-    chirpstack-application-server
-    chirpstack-gateway-bridge
-    zabbix-agent2
-  )
-  local pkg
-  for pkg in "${app_pkgs[@]}"; do
-    purge_if_installed "$pkg"
-  done
-
-  if ask_yes_no "Удалить также Mosquitto/Redis?"; then
-    for pkg in mosquitto mosquitto-clients redis-server redis-tools; do
-      purge_if_installed "$pkg"
-    done
+  if ask_yes_no "Удалить пакет chirpstack (v4 core)?"; then
+    purge_if_installed "chirpstack"
+  fi
+  if ask_yes_no "Удалить пакет chirpstack-network-server (v3)?"; then
+    purge_if_installed "chirpstack-network-server"
+  fi
+  if ask_yes_no "Удалить пакет chirpstack-application-server (v3)?"; then
+    purge_if_installed "chirpstack-application-server"
+  fi
+  if ask_yes_no "Удалить пакет chirpstack-gateway-bridge?"; then
+    purge_if_installed "chirpstack-gateway-bridge"
+  fi
+  if ask_yes_no "Удалить пакет zabbix-agent2?"; then
+    purge_if_installed "zabbix-agent2"
+  fi
+  if ask_yes_no "Удалить пакет mosquitto?"; then
+    purge_if_installed "mosquitto"
+  fi
+  if ask_yes_no "Удалить пакет mosquitto-clients?"; then
+    purge_if_installed "mosquitto-clients"
+  fi
+  if ask_yes_no "Удалить пакет redis-server?"; then
+    purge_if_installed "redis-server"
+  fi
+  if ask_yes_no "Удалить пакет redis-tools?"; then
+    purge_if_installed "redis-tools"
   fi
 
   if ask_yes_no "Удалить БД ChirpStack (chirpstack, lora_as, lora_ns) и роли?"; then
@@ -219,9 +228,18 @@ DROP ROLE IF EXISTS lora_ns;
 EOF
   fi
 
-  if ask_yes_no "Удалить остаточные каталоги /etc/chirpstack* и /var/lib/chirpstack*?"; then
+  if ask_yes_no "Удалить остаточные каталоги ChirpStack (/etc/chirpstack* и /var/lib/chirpstack*)?"; then
     rm -rf /etc/chirpstack /etc/chirpstack-network-server /etc/chirpstack-application-server /etc/chirpstack-gateway-bridge
     rm -rf /var/lib/chirpstack /var/lib/chirpstack-network-server /var/lib/chirpstack-application-server /var/lib/chirpstack-gateway-bridge
+  fi
+  if ask_yes_no "Удалить конфиг/логи Zabbix Agent2 (/etc/zabbix и /var/log/zabbix)?"; then
+    rm -rf /etc/zabbix /var/log/zabbix
+  fi
+  if ask_yes_no "Удалить конфиги/данные Mosquitto (/etc/mosquitto и /var/lib/mosquitto)?"; then
+    rm -rf /etc/mosquitto /var/lib/mosquitto
+  fi
+  if ask_yes_no "Удалить данные Redis (/var/lib/redis и /etc/redis)?"; then
+    rm -rf /var/lib/redis /etc/redis
   fi
 
   echo ">>> Удаление завершено."
