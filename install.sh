@@ -181,35 +181,39 @@ backup_v3_databases() {
 }
 
 run_v3_to_v4_migration() {
-  local dsn_v4="postgres://chirpstack:chirpstack@localhost/chirpstack?sslmode=disable"
-  local dsn_as="postgres://lora_as:lora_as@localhost/lora_as?sslmode=disable"
-  local dsn_ns="postgres://lora_ns:lora_ns@localhost/lora_ns?sslmode=disable"
+  local migrator=""
+  local cs_version_output=""
+  local cs_major=""
+  local cs_minor=""
 
   command -v chirpstack >/dev/null 2>&1 || die "Команда 'chirpstack' не найдена после установки v4."
 
-  echo ">>> Запуск миграции данных v3 -> v4"
-  echo "DSN v4 : $dsn_v4"
-  echo "DSN AS : $dsn_as"
-  echo "DSN NS : $dsn_ns"
-
-  # Поддерживаем наиболее частые варианты CLI между сборками.
-  if chirpstack migrate from-v3 \
-    --postgres-dsn "$dsn_v4" \
-    --application-server-dsn "$dsn_as" \
-    --network-server-dsn "$dsn_ns"; then
-    return 0
+  cs_version_output="$(chirpstack --version 2>/dev/null || true)"
+  if [[ "$cs_version_output" =~ ([0-9]+)\.([0-9]+)\.[0-9]+ ]]; then
+    cs_major="${BASH_REMATCH[1]}"
+    cs_minor="${BASH_REMATCH[2]}"
   fi
 
-  if chirpstack migrate \
-    --postgres-dsn "$dsn_v4" \
-    --application-server-dsn "$dsn_as" \
-    --network-server-dsn "$dsn_ns"; then
-    return 0
+  if [[ "$cs_major" != "4" || "$cs_minor" != "11" ]]; then
+    die "Для миграции v3 -> v4 требуется ChirpStack 4.11.x.
+Сейчас установлено: ${cs_version_output:-не удалось определить версию}.
+Положите в архитектурную папку пакет chirpstack 4.11.x, выполните миграцию, затем обновитесь до актуальной v4."
   fi
 
-  die "Не удалось автоматически выполнить миграцию.
-Проверьте формат команды в вашей версии: chirpstack --help / chirpstack migrate --help
-Бэкап БД уже сохранён, можно повторить миграцию вручную."
+  if command -v chirpstack-v3-to-v4 >/dev/null 2>&1; then
+    migrator="chirpstack-v3-to-v4"
+  elif [[ -x "${SCRIPT_DIR}/tools/chirpstack-v3-to-v4" ]]; then
+    migrator="${SCRIPT_DIR}/tools/chirpstack-v3-to-v4"
+  else
+    die "Не найден инструмент миграции chirpstack-v3-to-v4.
+Установите/положите бинарник в PATH или в ${SCRIPT_DIR}/tools/chirpstack-v3-to-v4"
+  fi
+
+  echo ">>> Запуск миграции данных v3 -> v4 через: $migrator"
+  "$migrator" \
+    --as-config-file /etc/chirpstack-application-server/chirpstack-application-server.toml \
+    --ns-config-file /etc/chirpstack-network-server/chirpstack-network-server.toml \
+    --cs-config-file /etc/chirpstack/chirpstack.toml
 }
 
 upgrade_v3_to_v4() {
