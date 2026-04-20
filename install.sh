@@ -153,11 +153,11 @@ run_v4() {
 }
 
 detect_installed_chirpstack() {
-  if dpkg -l 2>/dev/null | awk '{print $2}' | rg -q '^chirpstack-network-server$'; then
+  if dpkg -s chirpstack-network-server >/dev/null 2>&1; then
     echo "v3"
     return 0
   fi
-  if dpkg -l 2>/dev/null | awk '{print $2}' | rg -q '^chirpstack$'; then
+  if dpkg -s chirpstack >/dev/null 2>&1; then
     echo "v4"
     return 0
   fi
