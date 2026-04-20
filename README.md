@@ -21,6 +21,27 @@ cd /path/to/razvertka
 sudo ./install.sh
 ```
 
+Неинтерактивный запуск (через флаги):
+
+```bash
+# Установка v4 под amd64
+sudo ./install.sh --v4 --arch amd64
+
+# Обновление v3 -> v4 с миграцией и своим каталогом бэкапа
+sudo ./install.sh --upgrade --arch arm64 --backup-dir /var/backups/chirpstack
+
+# Удаление в режиме флагов (вопросы останутся, если не добавлять --yes)
+sudo ./install.sh --remove
+```
+
+Доступные флаги:
+
+- `--v3` / `--v4` / `--upgrade` / `--remove` — выбрать один режим.
+- `--arch auto|amd64|arm64` — архитектура пакетов.
+- `--backup-dir <path>` — путь для бэкапа БД при `--upgrade`.
+- `--yes` — автоматически отвечать `yes` на подтверждения.
+- `--help` — краткая справка.
+
 Доступные сценарии через меню:
 
 - Установка ChirpStack v3.
@@ -79,31 +100,19 @@ razvertka/
 
 - Перед запуском установки нужные `.deb` должны лежать **рядом** с `fast_...sh` (в корне соответствующей папки).
 - Подкаталоги `chirpv3x64`, `chirpv3ARM`, `amd`, `arm` используются как хранилище версий по архитектурам.
-- Перед установкой скопируйте нужные файлы из архитектурной папки в корень:
-  - `chirpstackv3&zabbix - install/` для v3.
-  - `chirpstackv4&zabbix - install/` для v4.
-
-Пример для v4 AMD64:
-
-```bash
-cd "chirpstackv4&zabbix - install"
-cp amd/chirpstack_*.deb .
-cp amd/chirpstack-gateway-bridge_*.deb .
-```
+- В `install.sh` есть выбор архитектуры (`auto` / `amd64` / `arm64`), после выбора скрипт сам подготавливает `.deb` из нужной подпапки.
 
 ## Как обновлять версии пакетов
 
 ### ChirpStack v3
 
 1. Положить новые `.deb` в `chirpstackv3&zabbix - install/chirpv3x64` или `chirpv3ARM`.
-2. Скопировать нужный набор в корень `chirpstackv3&zabbix - install/`.
-3. Запустить `install.sh` и выбрать установку v3.
+2. Запустить `install.sh`, выбрать установку v3 и архитектуру пакетов.
 
 ### ChirpStack v4
 
 1. Положить новые `.deb` в `chirpstackv4&zabbix - install/amd` или `arm`.
-2. Скопировать нужный набор в корень `chirpstackv4&zabbix - install/`.
-3. Запустить `install.sh` и выбрать установку v4.
+2. Запустить `install.sh`, выбрать установку v4 и архитектуру пакетов.
 
 ### Zabbix Agent2
 
@@ -150,7 +159,7 @@ cp amd/chirpstack-gateway-bridge_*.deb .
 
 ## Краткий чек-лист перед запуском
 
-- Нужные `.deb` лежат в правильной папке и скопированы в корень папки установки.
+- Нужные `.deb` лежат в правильной архитектурной папке (`chirpv3x64/chirpv3ARM` или `amd/arm`).
 - Проверена архитектура целевого сервера (`amd64` / `arm64`).
 - Подготовлены/проверены `zabbix_agent2.conf`.
 - Скрипт запускается от root: `sudo ./install.sh`.

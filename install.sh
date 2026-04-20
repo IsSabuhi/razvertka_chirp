@@ -8,6 +8,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DIR_V3="${SCRIPT_DIR}/chirpstackv3&zabbix - install"
 DIR_V4="${SCRIPT_DIR}/chirpstackv4&zabbix - install"
 BACKUP_DIR_DEFAULT="/var/backups/chirpstack-migration"
+ARCH_OVERRIDE=""
+ACTION=""
+AUTO_YES=0
+BACKUP_DIR_OVERRIDE=""
 
 die() {
   echo "Ошибка: $*" >&2
@@ -19,38 +23,117 @@ need_root() {
 }
 
 check_v3_packages() {
-  local ok=1
+  local ok=0
   shopt -s nullglob
   local gwb=( "${DIR_V3}"/chirpstack-gateway-bridge_*.deb )
   local ns=( "${DIR_V3}"/chirpstack-network-server_*.deb )
   local as=( "${DIR_V3}"/chirpstack-application-server_*.deb )
   local zab=( "${DIR_V3}"/zabbix-agent2_*.deb )
   shopt -u nullglob
-  [[ ${#gwb[@]} -ge 1 ]] || { echo "  Нет: chirpstack-gateway-bridge_*.deb"; ok=0; }
-  [[ ${#ns[@]} -ge 1 ]]  || { echo "  Нет: chirpstack-network-server_*.deb"; ok=0; }
-  [[ ${#as[@]} -ge 1 ]]  || { echo "  Нет: chirpstack-application-server_*.deb"; ok=0; }
-  [[ ${#zab[@]} -ge 1 ]] || { echo "  Нет: zabbix-agent2_*.deb"; ok=0; }
+  [[ ${#gwb[@]} -ge 1 ]] || { echo "  Нет: chirpstack-gateway-bridge_*.deb"; ok=1; }
+  [[ ${#ns[@]} -ge 1 ]]  || { echo "  Нет: chirpstack-network-server_*.deb"; ok=1; }
+  [[ ${#as[@]} -ge 1 ]]  || { echo "  Нет: chirpstack-application-server_*.deb"; ok=1; }
+  [[ ${#zab[@]} -ge 1 ]] || { echo "  Нет: zabbix-agent2_*.deb"; ok=1; }
   return "$ok"
 }
 
 check_v4_packages() {
-  local ok=1
+  local ok=0
   shopt -s nullglob
   local gwb=( "${DIR_V4}"/chirpstack-gateway-bridge_*.deb )
   local cs=( "${DIR_V4}"/chirpstack_*.deb )
   local zab=( "${DIR_V4}"/zabbix-agent2_*.deb )
   shopt -u nullglob
-  [[ ${#gwb[@]} -ge 1 ]] || { echo "  Нет: chirpstack-gateway-bridge_*.deb"; ok=0; }
-  [[ ${#cs[@]} -ge 1 ]]  || { echo "  Нет: chirpstack_*.deb"; ok=0; }
-  [[ ${#zab[@]} -ge 1 ]] || { echo "  Нет: zabbix-agent2_*.deb"; ok=0; }
+  [[ ${#gwb[@]} -ge 1 ]] || { echo "  Нет: chirpstack-gateway-bridge_*.deb"; ok=1; }
+  [[ ${#cs[@]} -ge 1 ]]  || { echo "  Нет: chirpstack_*.deb"; ok=1; }
+  [[ ${#zab[@]} -ge 1 ]] || { echo "  Нет: zabbix-agent2_*.deb"; ok=1; }
   return "$ok"
+}
+
+detect_host_arch() {
+  local arch
+  arch="$(uname -m)"
+  case "$arch" in
+    x86_64|amd64) echo "amd64" ;;
+    aarch64|arm64) echo "arm64" ;;
+    *) echo "unknown" ;;
+  esac
+}
+
+choose_arch() {
+  if [[ -n "$ARCH_OVERRIDE" ]]; then
+    case "$ARCH_OVERRIDE" in
+      amd64|arm64)
+        echo "$ARCH_OVERRIDE"
+        return 0
+        ;;
+      auto)
+        ARCH_OVERRIDE="$(detect_host_arch)"
+        [[ "$ARCH_OVERRIDE" == "unknown" ]] && die "Не удалось определить архитектуру хоста автоматически."
+        echo "$ARCH_OVERRIDE"
+        return 0
+        ;;
+      *)
+        die "Неверное значение --arch: $ARCH_OVERRIDE (допустимо: auto|amd64|arm64)"
+        ;;
+    esac
+  fi
+
+  local default_arch
+  default_arch="$(detect_host_arch)"
+  local answer
+  echo "Выбор архитектуры пакетов:" >&2
+  echo "  1) auto (${default_arch})" >&2
+  echo "  2) amd64" >&2
+  echo "  3) arm64" >&2
+  read -r -p "Введите номер [1]: " answer
+  answer="${answer:-1}"
+  case "$answer" in
+    1)
+      [[ "$default_arch" == "unknown" ]] && die "Не удалось определить архитектуру хоста. Выберите amd64 или arm64 вручную."
+      echo "$default_arch"
+      ;;
+    2) echo "amd64" ;;
+    3) echo "arm64" ;;
+    *) die "Неверный выбор архитектуры: $answer" ;;
+  esac
+}
+
+prepare_v3_packages() {
+  local arch src
+  arch="$(choose_arch)"
+  case "$arch" in
+    amd64) src="${DIR_V3}/chirpv3x64" ;;
+    arm64) src="${DIR_V3}/chirpv3ARM" ;;
+    *) die "Неподдерживаемая архитектура для v3: $arch" ;;
+  esac
+  [[ -d "$src" ]] || die "Каталог с пакетами не найден: $src"
+  echo ">>> Подготовка пакетов v3 из: $src"
+  cp -f "${src}"/chirpstack-gateway-bridge_*.deb "$DIR_V3"/
+  cp -f "${src}"/chirpstack-network-server_*.deb "$DIR_V3"/
+  cp -f "${src}"/chirpstack-application-server_*.deb "$DIR_V3"/
+}
+
+prepare_v4_packages() {
+  local arch src
+  arch="$(choose_arch)"
+  case "$arch" in
+    amd64) src="${DIR_V4}/amd" ;;
+    arm64) src="${DIR_V4}/arm" ;;
+    *) die "Неподдерживаемая архитектура для v4: $arch" ;;
+  esac
+  [[ -d "$src" ]] || die "Каталог с пакетами не найден: $src"
+  echo ">>> Подготовка пакетов v4 из: $src"
+  cp -f "${src}"/chirpstack_*.deb "$DIR_V4"/
+  cp -f "${src}"/chirpstack-gateway-bridge_*.deb "$DIR_V4"/
 }
 
 run_v3() {
   [[ -d "$DIR_V3" ]] || die "Каталог не найден: $DIR_V3"
+  prepare_v3_packages
   echo "Проверка .deb в: $DIR_V3"
   if ! check_v3_packages; then
-    die "Положите недостающие пакеты в каталог выше и повторите."
+    die "Не найдены обязательные .deb в каталоге установки v3."
   fi
   echo
   echo ">>> Запуск установки ChirpStack v3 (fast_razvertka.sh)..."
@@ -59,9 +142,10 @@ run_v3() {
 
 run_v4() {
   [[ -d "$DIR_V4" ]] || die "Каталог не найден: $DIR_V4"
+  prepare_v4_packages
   echo "Проверка .deb в: $DIR_V4"
   if ! check_v4_packages; then
-    die "Положите недостающие пакеты в каталог выше и повторите."
+    die "Не найдены обязательные .deb в каталоге установки v4."
   fi
   echo
   echo ">>> Запуск установки ChirpStack v4 (fast_razvertkav4.sh)..."
@@ -130,9 +214,10 @@ run_v3_to_v4_migration() {
 
 upgrade_v3_to_v4() {
   [[ -d "$DIR_V4" ]] || die "Каталог не найден: $DIR_V4"
+  prepare_v4_packages
   echo "Проверка .deb для обновления в: $DIR_V4"
   if ! check_v4_packages; then
-    die "Положите недостающие v4-пакеты в каталог выше и повторите."
+    die "Не найдены обязательные v4 .deb в каталоге установки."
   fi
 
   local detected
@@ -141,8 +226,13 @@ upgrade_v3_to_v4() {
     die "Сценарий обновления применим только при установленном ChirpStack v3 (обнаружено: $detected)."
   fi
 
-  read -r -p "Каталог для бэкапов БД [${BACKUP_DIR_DEFAULT}]: " backup_dir
-  backup_dir="${backup_dir:-$BACKUP_DIR_DEFAULT}"
+  if [[ -n "$BACKUP_DIR_OVERRIDE" ]]; then
+    backup_dir="$BACKUP_DIR_OVERRIDE"
+    echo "Каталог для бэкапов БД: $backup_dir"
+  else
+    read -r -p "Каталог для бэкапов БД [${BACKUP_DIR_DEFAULT}]: " backup_dir
+    backup_dir="${backup_dir:-$BACKUP_DIR_DEFAULT}"
+  fi
 
   echo ">>> Останавливаем сервисы v3 перед миграцией"
   systemctl stop chirpstack-network-server chirpstack-application-server chirpstack-gateway-bridge || true
@@ -159,6 +249,10 @@ upgrade_v3_to_v4() {
 
 ask_yes_no() {
   local prompt="$1"
+  if [[ "$AUTO_YES" -eq 1 ]]; then
+    echo "$prompt [y/N]: y"
+    return 0
+  fi
   local answer
   read -r -p "$prompt [y/N]: " answer
   [[ "${answer,,}" == "y" || "${answer,,}" == "yes" ]]
@@ -255,8 +349,80 @@ razvertka — установка стека LoRaWAN (ChirpStack + Zabbix Agent2)
 EOF
 }
 
+show_help() {
+  cat <<'EOF'
+Использование:
+  sudo ./install.sh [опции]
+
+Режимы:
+  --v3           Установка ChirpStack v3
+  --v4           Установка ChirpStack v4
+  --upgrade      Обновление v3 -> v4 + миграция
+  --remove       Выборочное удаление компонентов
+
+Опции:
+  --arch VALUE   auto|amd64|arm64
+  --backup-dir   Каталог для бэкапа БД (для --upgrade)
+  --yes          Авто-ответ "yes" на вопросы подтверждения
+  -h, --help     Показать справку
+
+Примеры:
+  sudo ./install.sh --v4 --arch amd64
+  sudo ./install.sh --upgrade --arch arm64 --backup-dir /var/backups/chirpstack
+  sudo ./install.sh --remove
+EOF
+}
+
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --v3|--v4|--upgrade|--remove)
+        [[ -n "$ACTION" ]] && die "Укажите только один режим (--v3|--v4|--upgrade|--remove)."
+        ACTION="${1#--}"
+        shift
+        ;;
+      --arch)
+        shift
+        [[ $# -gt 0 ]] || die "После --arch нужно указать значение."
+        ARCH_OVERRIDE="$1"
+        shift
+        ;;
+      --backup-dir)
+        shift
+        [[ $# -gt 0 ]] || die "После --backup-dir нужно указать путь."
+        BACKUP_DIR_OVERRIDE="$1"
+        shift
+        ;;
+      --yes)
+        AUTO_YES=1
+        shift
+        ;;
+      -h|--help)
+        show_help
+        exit 0
+        ;;
+      *)
+        die "Неизвестный аргумент: $1 (используйте --help)."
+        ;;
+    esac
+  done
+}
+
 main() {
   need_root
+  parse_args "$@"
+
+  if [[ -n "$ACTION" ]]; then
+    case "$ACTION" in
+      v3) run_v3 ;;
+      v4) run_v4 ;;
+      upgrade) upgrade_v3_to_v4 ;;
+      remove) remove_stack ;;
+      *) die "Неизвестный режим: $ACTION" ;;
+    esac
+    exit 0
+  fi
+
   show_menu
 
   PS3="Введите номер пункта и нажмите Enter: "
