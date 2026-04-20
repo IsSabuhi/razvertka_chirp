@@ -1,0 +1,46 @@
+################
+# Unit Section #
+################
+
+[Unit]
+
+Description=LoraMes
+
+# Send an email if the service ever fails
+#OnFailure=status-email@%n.service
+
+###################
+# Service Section #
+###################
+
+[Service]
+
+# User to run the service as
+WorkingDirectory=/home/smzis/Messs/
+User=root
+
+# Group to run the service as
+#Group=tal
+
+# Type of service
+Type=simple
+
+# Main task
+ExecStart=sudo /bin/sh home/smzis/Messs/start.sh 
+
+# Required to see Python output in logs
+Environment="PYTHONUNBUFFERED=x"
+
+# Uncomment this to see debug messages
+#Environment="DEBUG=true"
+
+# If the script ever dies, restart it
+Restart=always
+RestartSec=5
+
+###################
+# Install Section #
+###################
+
+[Install]
+WantedBy=multi-user.target
