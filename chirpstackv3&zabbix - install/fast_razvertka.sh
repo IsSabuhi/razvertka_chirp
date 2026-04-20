@@ -2,6 +2,14 @@
 
 set -e  # Остановка при ошибках
 
+ensure_line_in_file() {
+    local line="$1"
+    local file="$2"
+    if ! grep -Fxq "$line" "$file" 2>/dev/null; then
+        echo "$line" | sudo tee -a "$file" >/dev/null
+    fi
+}
+
 echo "Обновление системы и установка зависимостей..."
 apt-get update
 apt-get install -y mosquitto mosquitto-clients redis-server redis-tools postgresql openssl
@@ -57,13 +65,23 @@ echo "Логирование настроено"
 
 echo "Настройка PostgreSQL..."
 sudo -u postgres psql <<EOF
-CREATE ROLE lora_ns LOGIN PASSWORD 'lora_ns';
-CREATE DATABASE lora_ns OWNER lora_ns;
-CREATE ROLE lora_as LOGIN PASSWORD 'lora_as';
-CREATE DATABASE lora_as OWNER lora_as;
+DO \$\$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'lora_ns') THEN
+        CREATE ROLE lora_ns LOGIN PASSWORD 'lora_ns';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'lora_as') THEN
+        CREATE ROLE lora_as LOGIN PASSWORD 'lora_as';
+    END IF;
+END
+\$\$;
+SELECT 'CREATE DATABASE lora_ns OWNER lora_ns'
+WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'lora_ns')\gexec
+SELECT 'CREATE DATABASE lora_as OWNER lora_as'
+WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'lora_as')\gexec
 \\c lora_as
-CREATE EXTENSION pg_trgm;
-CREATE EXTENSION hstore;
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE EXTENSION IF NOT EXISTS hstore;
 EOF
 
 echo "Установка ChirpStack из локальных .deb файлов..."
@@ -73,12 +91,14 @@ dpkg -i chirpstack-application-server_*.deb
 
 echo "Конфигурация chirpstack-gateway-bridge..."
 TOML="/etc/chirpstack-gateway-bridge/chirpstack-gateway-bridge.toml"
-sudo sed -i '0,/^$/{s/^$/[general]\nlog_level=2\nlog_to_syslog=true\n/}' "$TOML"
+sudo sed -i 's/^[[:space:]]*log_level[[:space:]]*=.*/log_level=2/' "$TOML"
+sudo sed -i 's/^[[:space:]]*log_to_syslog[[:space:]]*=.*/log_to_syslog=true/' "$TOML"
 sudo sed -i 's/marshaler="[^"]*"/marshaler="json"/' "$TOML"
 
 echo "Конфигурация chirpstack-network-server (RU864-870)..."
 TOML="/etc/chirpstack-network-server/chirpstack-network-server.toml"
-sudo sed -i '0,/^$/{s/^$/[general]\nlog_level=2\nlog_to_syslog=true\n/}' "$TOML"
+sudo sed -i 's/^[[:space:]]*log_level[[:space:]]*=.*/log_level=2/' "$TOML"
+sudo sed -i 's/^[[:space:]]*log_to_syslog[[:space:]]*=.*/log_to_syslog=true/' "$TOML"
 sudo sed -i 's!dsn="[^"]*"!dsn="postgres://lora_ns:lora_ns@localhost/lora_ns?sslmode=disable"!' "$TOML"
 sudo sed -i 's/name="EU868"/name="RU_864_870"/' "$TOML"
 sudo sed -i 's/frequency=867/frequency=864/' "$TOML"
@@ -87,15 +107,17 @@ sudo sed -i '/\[network_server.network_settings\]/a \ \ \ \ downlink_tx_power=20
 
 echo "Конфигурация chirpstack-application-server..."
 TOML="/etc/chirpstack-application-server/chirpstack-application-server.toml"
-sudo sed -i '0,/^$/{s/^$/[general]\nlog_level=2\nlog_to_syslog=true\n/}' "$TOML"
+sudo sed -i 's/^[[:space:]]*log_level[[:space:]]*=.*/log_level=2/' "$TOML"
+sudo sed -i 's/^[[:space:]]*log_to_syslog[[:space:]]*=.*/log_to_syslog=true/' "$TOML"
 sudo sed -i 's!dsn="[^"]*"!dsn="postgres://lora_as:lora_as@localhost/lora_as?sslmode=disable"!' "$TOML"
 sudo sed -i 's/marshaler="[^"]*"/marshaler="json"/' "$TOML"
 SECRET=$(openssl rand -base64 32)
 sudo sed -i "s!jwt_secret=\"[^\"]*\"!jwt_secret=\"$SECRET\"!" "$TOML"
 
 echo "Настройка Mosquitto..."
-echo "listener 1883" | sudo tee -a /etc/mosquitto/mosquitto.conf
-echo "allow_anonymous true" | sudo tee -a /etc/mosquitto/mosquitto.conf
+MOSQUITTO_CONF="/etc/mosquitto/mosquitto.conf"
+ensure_line_in_file "listener 1883" "$MOSQUITTO_CONF"
+ensure_line_in_file "allow_anonymous true" "$MOSQUITTO_CONF"
 
 echo "Установка Zabbix Agent2 из локального .deb..."
 dpkg -i zabbix-agent2_6.4.9-1+debian12_amd64.deb

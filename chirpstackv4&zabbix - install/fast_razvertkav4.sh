@@ -2,6 +2,14 @@
 
 set -e  # Остановка при ошибках
 
+ensure_line_in_file() {
+    local line="$1"
+    local file="$2"
+    if ! grep -Fxq "$line" "$file" 2>/dev/null; then
+        echo "$line" | sudo tee -a "$file" >/dev/null
+    fi
+}
+
 echo "Обновление системы и установка зависимостей..."
 apt-get update
 apt-get install -y mosquitto mosquitto-clients redis-server redis-tools postgresql postgresql-contrib openssl gpg curl
@@ -58,8 +66,15 @@ echo "Логирование настроено"
 echo "Настройка PostgreSQL..."
 sudo -u postgres psql <<EOF
 -- ChirpStack v4 использует единую БД вместо раздельных в v3
-CREATE ROLE chirpstack LOGIN PASSWORD 'chirpstack';
-CREATE DATABASE chirpstack OWNER chirpstack;
+DO \$\$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'chirpstack') THEN
+        CREATE ROLE chirpstack LOGIN PASSWORD 'chirpstack';
+    END IF;
+END
+\$\$;
+SELECT 'CREATE DATABASE chirpstack OWNER chirpstack'
+WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'chirpstack')\gexec
 \\c chirpstack
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 CREATE EXTENSION IF NOT EXISTS hstore;
@@ -77,7 +92,8 @@ GB_TOML="/etc/chirpstack-gateway-bridge/chirpstack-gateway-bridge.toml"
 [ -f "$GB_TOML" ] && cp "$GB_TOML" "${GB_TOML}.backup.$(date +%Y%m%d_%H%M%S)"
 
 # Базовые настройки логирования и MQTT тем для RU864
-sudo sed -i '0,/^$/{s/^$/[general]\nlog_level=2\nlog_to_syslog=true\n/}' "$GB_TOML"
+sudo sed -i 's/^[[:space:]]*log_level[[:space:]]*=.*/log_level=2/' "$GB_TOML"
+sudo sed -i 's/^[[:space:]]*log_to_syslog[[:space:]]*=.*/log_to_syslog=true/' "$GB_TOML"
 sudo sed -i 's|event_topic_template="[^"]*"|event_topic_template="ru864/gateway/{{ .GatewayID }}/event/{{ .EventType }}"|' "$GB_TOML"
 sudo sed -i 's|command_topic_template="[^"]*"|command_topic_template="ru864/gateway/{{ .GatewayID }}/command/#"|' "$GB_TOML"
 sudo sed -i 's|state_topic_template="[^"]*"|state_topic_template="ru864/gateway/{{ .GatewayID }}/state/{{ .StateType }}"|' "$GB_TOML"
@@ -88,7 +104,8 @@ TOML="/etc/chirpstack/chirpstack.toml"
 [ -f "$TOML" ] && cp "$TOML" "${TOML}.backup.$(date +%Y%m%d_%H%M%S)"
 
 # [general] секция
-sudo sed -i '0,/^$/{s/^$/[general]\nlog_level=2\nlog_to_syslog=true\n/}' "$TOML"
+sudo sed -i 's/^[[:space:]]*log_level[[:space:]]*=.*/log_level=2/' "$TOML"
+sudo sed -i 's/^[[:space:]]*log_to_syslog[[:space:]]*=.*/log_to_syslog=true/' "$TOML"
 
 # PostgreSQL DSN (единая БД для v4)
 sudo sed -i 's|dsn="[^"]*"|dsn="postgres://chirpstack:chirpstack@localhost/chirpstack?sslmode=disable"|' "$TOML"
@@ -212,8 +229,9 @@ max_dr = 7
 EOF
 
 echo "Настройка Mosquitto..."
-echo "listener 1883" | sudo tee -a /etc/mosquitto/mosquitto.conf
-echo "allow_anonymous true" | sudo tee -a /etc/mosquitto/mosquitto.conf
+MOSQUITTO_CONF="/etc/mosquitto/mosquitto.conf"
+ensure_line_in_file "listener 1883" "$MOSQUITTO_CONF"
+ensure_line_in_file "allow_anonymous true" "$MOSQUITTO_CONF"
 
 echo "Установка Zabbix Agent2 из локального .deb..."
 dpkg -i zabbix-agent2_6.4.9-1+debian12_amd64.deb
