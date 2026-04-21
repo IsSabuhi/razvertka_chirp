@@ -138,7 +138,7 @@ razvertka/
 - если `chirpstack` уже **4.11.x**, шаг `fast_razvertkav4.sh` **пропускается**;
 - иначе — `fast_razvertkav4.sh` с `CHIRPSTACK_GATEWAY_DEB_DIR=amd|arm` и `CHIRPSTACK_CORE_DEB_DIR=<каталог 4.11.1>`;
 - останавливает v3, бэкап БД;
-- запускает `chirpstack-v3-to-v4` (в `PATH` или `tools/chirpstack-v3-to-v4`).
+- запускает `chirpstack-v3-to-v4`: если утилиты нет, при наличии **curl** и доступа в интернет скрипт **скачивает** релиз с [GitHub](https://github.com/chirpstack/chirpstack-v3-to-v4/releases) в `tools/chirpstack-v3-to-v4`; иначе положите бинарник вручную или задайте `SKIP_MIGRATOR_DOWNLOAD=1` / `--skip-migrator-download` и укажите локальный файл.
 
 После миграции при необходимости обновите `chirpstack` до новой v4 из `amd`/`arm`.
 

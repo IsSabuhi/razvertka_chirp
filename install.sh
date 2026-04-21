@@ -14,6 +14,9 @@ ARCH_OVERRIDE=""
 ACTION=""
 AUTO_YES=0
 BACKUP_DIR_OVERRIDE=""
+# Версия релиза утилиты https://github.com/chirpstack/chirpstack-v3-to-v4 (тег v4.0.11 → 4.0.11)
+CHIRPSTACK_MIGRATOR_VER="${CHIRPSTACK_MIGRATOR_VER:-4.0.11}"
+SKIP_MIGRATOR_DOWNLOAD="${SKIP_MIGRATOR_DOWNLOAD:-0}"
 
 die() {
   echo "Ошибка: $*" >&2
@@ -189,6 +192,73 @@ chirpstack_dpkg_version() {
   dpkg-query -W -f='${Version}' chirpstack 2>/dev/null || echo ""
 }
 
+download_migrator_to_tools() {
+  local tools_dir="${SCRIPT_DIR}/tools"
+  local ver="$CHIRPSTACK_MIGRATOR_VER"
+  local tag="v${ver}"
+  local mach uarch tarball url tmpdir candidate target
+  command -v curl >/dev/null 2>&1 || {
+    echo "Для авто-загрузки мигратора нужен curl." >&2
+    return 1
+  }
+  mach="$(uname -m)"
+  case "$mach" in
+    x86_64) uarch="amd64" ;;
+    aarch64) uarch="arm64" ;;
+    armv7l) uarch="armv7" ;;
+    *)
+      echo "Авто-загрузка мигратора: неизвестная архитектура $mach" >&2
+      return 1
+      ;;
+  esac
+  tarball="chirpstack-v3-to-v4_${ver}_linux_${uarch}.tar.gz"
+  url="https://github.com/chirpstack/chirpstack-v3-to-v4/releases/download/${tag}/${tarball}"
+  target="${tools_dir}/chirpstack-v3-to-v4"
+  mkdir -p "$tools_dir"
+  tmpdir="$(mktemp -d)"
+  echo ">>> Скачиваем утилиту миграции (${tarball})..." >&2
+  if ! curl -fsSL "$url" -o "${tmpdir}/${tarball}"; then
+    rm -rf "$tmpdir"
+    echo "Не удалось скачать: $url" >&2
+    return 1
+  fi
+  tar -xzf "${tmpdir}/${tarball}" -C "$tmpdir"
+  candidate="$(find "$tmpdir" -type f \( -name 'chirpstack-v3-to-v4' -o -name 'chirpstack-v3-to-v4_*' \) ! -name '*.tar.gz' 2>/dev/null | head -1)"
+  if [[ -z "$candidate" ]]; then
+    candidate="$(find "$tmpdir" -maxdepth 4 -type f -perm -111 ! -name '*.tar.gz' 2>/dev/null | head -1)"
+  fi
+  if [[ -z "$candidate" || ! -f "$candidate" ]]; then
+    rm -rf "$tmpdir"
+    echo "В архиве не найден исполняемый файл мигратора." >&2
+    return 1
+  fi
+  cp -f "$candidate" "$target"
+  chmod +x "$target"
+  rm -rf "$tmpdir"
+  echo ">>> Мигратор сохранён: $target" >&2
+  return 0
+}
+
+resolve_migrator_binary() {
+  local p="${SCRIPT_DIR}/tools/chirpstack-v3-to-v4"
+  if command -v chirpstack-v3-to-v4 >/dev/null 2>&1; then
+    echo "chirpstack-v3-to-v4"
+    return 0
+  fi
+  if [[ -x "$p" ]]; then
+    echo "$p"
+    return 0
+  fi
+  if [[ "$SKIP_MIGRATOR_DOWNLOAD" == "1" ]]; then
+    return 1
+  fi
+  if download_migrator_to_tools && [[ -x "$p" ]]; then
+    echo "$p"
+    return 0
+  fi
+  return 1
+}
+
 run_v3() {
   [[ -d "$DIR_V3" ]] || die "Каталог не найден: $DIR_V3"
   prepare_v3_packages
@@ -262,14 +332,10 @@ run_v3_to_v4_migration() {
 Положите в архитектурную папку пакет chirpstack 4.11.x, выполните миграцию, затем обновитесь до актуальной v4."
   fi
 
-  if command -v chirpstack-v3-to-v4 >/dev/null 2>&1; then
-    migrator="chirpstack-v3-to-v4"
-  elif [[ -x "${SCRIPT_DIR}/tools/chirpstack-v3-to-v4" ]]; then
-    migrator="${SCRIPT_DIR}/tools/chirpstack-v3-to-v4"
-  else
-    die "Не найден инструмент миграции chirpstack-v3-to-v4.
-Установите/положите бинарник в PATH или в ${SCRIPT_DIR}/tools/chirpstack-v3-to-v4"
-  fi
+  migrator="$(resolve_migrator_binary)" || die "Не найден инструмент миграции chirpstack-v3-to-v4.
+Если есть интернет и curl: повторите запуск — скрипт скачает релиз ${CHIRPSTACK_MIGRATOR_VER} с GitHub в ${SCRIPT_DIR}/tools/.
+Без сети: скачайте .tar.gz с https://github.com/chirpstack/chirpstack-v3-to-v4/releases , распакуйте бинарник в ${SCRIPT_DIR}/tools/chirpstack-v3-to-v4
+Офлайн без авто-скачивания: export SKIP_MIGRATOR_DOWNLOAD=1 и положите бинарник вручную."
 
   echo ">>> Запуск миграции данных v3 -> v4 через: $migrator"
   "$migrator" \
@@ -450,7 +516,12 @@ show_help() {
   --arch VALUE   auto|amd64|arm64
   --backup-dir   Каталог для бэкапа БД (для --upgrade)
   --yes          Авто-ответ "yes" на вопросы подтверждения
+  --skip-migrator-download  Не скачивать chirpstack-v3-to-v4 с GitHub (нужен локальный tools/chirpstack-v3-to-v4)
   -h, --help     Показать справку
+
+Переменные окружения:
+  CHIRPSTACK_MIGRATOR_VER   Версия релиза мигратора на GitHub (по умолчанию 4.0.11)
+  SKIP_MIGRATOR_DOWNLOAD=1  То же, что --skip-migrator-download
 
 Примеры:
   sudo ./install.sh --v4 --arch amd64
@@ -481,6 +552,10 @@ parse_args() {
         ;;
       --yes)
         AUTO_YES=1
+        shift
+        ;;
+      --skip-migrator-download)
+        SKIP_MIGRATOR_DOWNLOAD=1
         shift
         ;;
       -h|--help)
