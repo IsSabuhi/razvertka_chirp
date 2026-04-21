@@ -80,12 +80,26 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm;
 CREATE EXTENSION IF NOT EXISTS hstore;
 EOF
 
-echo "Установка ChirpStack v4 из локальных .deb файлов..."
+# Пакеты ChirpStack: по умолчанию из текущего каталога, иначе CHIRPSTACK_DEB_DIR (например amd или arm).
+CHIRP_DEB_DIR="${CHIRPSTACK_DEB_DIR:-.}"
+echo "Установка ChirpStack v4 из локальных .deb (каталог относительно скрипта: ${CHIRP_DEB_DIR})..."
 # ВАЖНО: Для v4 нужны только два пакета:
-# • chirpstack_4.x.x_amd64.deb (объединяет NS+AS+API)
-# • chirpstack-gateway-bridge_4.x.x_amd64.deb (для шлюзов)
-dpkg -i chirpstack-gateway-bridge_*.deb
-dpkg -i chirpstack_*.deb
+# • chirpstack_*.deb (объединяет NS+AS+API)
+# • chirpstack-gateway-bridge_*.deb (для шлюзов)
+shopt -s nullglob
+GATE=( "${CHIRP_DEB_DIR}"/chirpstack-gateway-bridge_*.deb )
+CS=( "${CHIRP_DEB_DIR}"/chirpstack_*.deb )
+shopt -u nullglob
+if [[ ${#GATE[@]} -lt 1 ]]; then
+    echo "Ошибка: не найден chirpstack-gateway-bridge_*.deb в ${CHIRP_DEB_DIR}" >&2
+    exit 1
+fi
+if [[ ${#CS[@]} -lt 1 ]]; then
+    echo "Ошибка: не найден chirpstack_*.deb в ${CHIRP_DEB_DIR}" >&2
+    exit 1
+fi
+dpkg -i "${GATE[@]}"
+dpkg -i "${CS[@]}"
 
 echo "Конфигурация chirpstack-gateway-bridge..."
 GB_TOML="/etc/chirpstack-gateway-bridge/chirpstack-gateway-bridge.toml"
@@ -234,7 +248,17 @@ ensure_line_in_file "listener 1883" "$MOSQUITTO_CONF"
 ensure_line_in_file "allow_anonymous true" "$MOSQUITTO_CONF"
 
 echo "Установка Zabbix Agent2 из локального .deb..."
-dpkg -i zabbix-agent2_6.4.9-1+debian12_amd64.deb
+shopt -s nullglob
+ZAB=( ./zabbix-agent2_*.deb )
+if [[ ${#ZAB[@]} -eq 0 ]]; then
+    ZAB=( "${CHIRP_DEB_DIR}"/zabbix-agent2_*.deb )
+fi
+shopt -u nullglob
+if [[ ${#ZAB[@]} -lt 1 ]]; then
+    echo "Ошибка: не найден zabbix-agent2_*.deb в ./ или в ${CHIRP_DEB_DIR}" >&2
+    exit 1
+fi
+dpkg -i "${ZAB[@]}"
 cp zabbix_agent2.conf /etc/zabbix/zabbix_agent2.conf
 systemctl daemon-reload
 systemctl enable zabbix-agent2

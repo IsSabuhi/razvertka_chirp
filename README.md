@@ -7,7 +7,7 @@
 - Устанавливает и настраивает ChirpStack v3 или v4.
 - Настраивает сопутствующие сервисы: PostgreSQL, Mosquitto, Redis.
 - Ставит и настраивает Zabbix Agent2.
-- Поддерживает миграцию `v3 -> ChirpStack 4.11.x` (отдельные пакеты в `chirp411-amd` / `chirp411-arm`).
+- Поддерживает миграцию `v3 -> ChirpStack 4.11.x` (пакеты 4.11 лежат в `amd/` или `arm/` рядом с остальными).
 - Поддерживает выборочное удаление компонентов.
 
 ## Точка входа
@@ -27,7 +27,7 @@ sudo ./install.sh
 # Установка v4 под amd64
 sudo ./install.sh --v4 --arch amd64
 
-# Миграция v3 -> 4.11 (пакеты 4.11 в chirp411-amd или chirp411-arm)
+# Миграция v3 -> 4.11 (положите chirpstack 4.11 в arm/ или amd/)
 sudo ./install.sh --upgrade --arch arm64 --backup-dir /var/backups/chirpstack
 
 # Удаление в режиме флагов (вопросы останутся, если не добавлять --yes)
@@ -77,14 +77,8 @@ razvertka/
 │   ├── amd/
 │   │   ├── chirpstack_*.deb
 │   │   └── chirpstack-gateway-bridge_*.deb
-│   ├── arm/
-│   │   ├── chirpstack_*.deb
-│   │   └── chirpstack-gateway-bridge_*.deb
-│   ├── chirp411-amd/
-│   │   ├── chirpstack_4.11.*.deb
-│   │   └── chirpstack-gateway-bridge_*.deb
-│   └── chirp411-arm/
-│       ├── chirpstack_4.11.*.deb
+│   └── arm/
+│       ├── chirpstack_*.deb
 │       └── chirpstack-gateway-bridge_*.deb
 └── LoraMes/
     ├── Lora.py
@@ -104,9 +98,9 @@ razvertka/
 
 Это значит:
 
-- Перед запуском установки нужные `.deb` должны лежать **рядом** с `fast_...sh` (в корне соответствующей папки).
-- Подкаталоги `chirpv3x64`, `chirpv3ARM`, `amd`, `arm` используются как хранилище версий по архитектурам.
-- В `install.sh` есть выбор архитектуры (`auto` / `amd64` / `arm64`), после выбора скрипт сам подготавливает `.deb` из нужной подпапки.
+- Для **v3** скрипт копирует `.deb` из `chirpv3x64` / `chirpv3ARM` в корень каталога установки v3 (как раньше).
+- Для **v4** и для **миграции v3→4.11** пакеты ChirpStack берутся **напрямую** из подкаталога `amd` или `arm` (копирование в корень не требуется); `install.sh` передаёт путь через переменную `CHIRPSTACK_DEB_DIR`.
+- Zabbix Agent2: `zabbix-agent2_*.deb` может лежать в **корне** `chirpstackv4&zabbix - install/` или в том же `amd`/`arm`.
 
 ## Как обновлять версии пакетов
 
@@ -128,23 +122,25 @@ razvertka/
 
 Через `install.sh` выберите пункт миграции v3 → 4.11 или запустите `sudo ./install.sh --upgrade`.
 
-Перед этим положите **только** пакеты **ChirpStack 4.11.x** в каталог архитектуры:
+Положите пакеты **ChirpStack 4.11.x** в каталог архитектуры, который выберет скрипт:
 
-- `chirpstackv4&zabbix - install/chirp411-amd/` — для amd64;
-- `chirpstackv4&zabbix - install/chirp411-arm/` — для arm64.
+- `chirpstackv4&zabbix - install/amd/` — для amd64;
+- `chirpstackv4&zabbix - install/arm/` — для arm64.
 
 В каталоге должны быть как минимум:
 
-- `chirpstack_*.deb` (имя файла должно содержать `4.11`);
+- `chirpstack_*.deb` (в имени файла должно быть **`4.11`** — так проверяет скрипт);
 - `chirpstack-gateway-bridge_*.deb`.
 
-`zabbix-agent2_*.deb` может лежать в корне `chirpstackv4&zabbix - install/` или копируется из `amd`/`arm` при подготовке.
+`zabbix-agent2_*.deb` — в корне `chirpstackv4&zabbix - install/` или в том же `amd`/`arm`.
+
+В папке `amd`/`arm` не держите одновременно два разных `chirpstack_*.deb` (например 4.11 и 4.17), иначе `dpkg` может установить не то.
 
 Сценарий делает:
 
 - проверку, что установлен только стек v3;
 - если пакет `chirpstack` уже **4.11.x**, полная установка `fast_razvertkav4.sh` **пропускается** (остаётся миграция);
-- иначе — подготовка `.deb` из `chirp411-*`, затем `fast_razvertkav4.sh` (зависимости, PostgreSQL, конфиги, установка 4.11);
+- иначе — `fast_razvertkav4.sh` с `CHIRPSTACK_DEB_DIR=amd|arm` (зависимости, PostgreSQL, конфиги, установка 4.11 из этой папки);
 - остановку сервисов v3, бэкап БД `lora_as` / `lora_ns`;
 - запуск миграции через утилиту `chirpstack-v3-to-v4` (в `PATH` или `tools/chirpstack-v3-to-v4`).
 

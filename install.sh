@@ -37,16 +37,26 @@ check_v3_packages() {
   return "$ok"
 }
 
+# $1 — подкаталог с .deb для ChirpStack: amd или arm (без копирования в корень).
 check_v4_packages() {
+  local sub="${1:?}"
+  local p="${DIR_V4}/${sub}"
   local ok=0
+  [[ -d "$p" ]] || { echo "  Нет каталога: $p"; return 1; }
   shopt -s nullglob
-  local gwb=( "${DIR_V4}"/chirpstack-gateway-bridge_*.deb )
-  local cs=( "${DIR_V4}"/chirpstack_*.deb )
-  local zab=( "${DIR_V4}"/zabbix-agent2_*.deb )
+  local gwb=( "${p}"/chirpstack-gateway-bridge_*.deb )
+  local cs=( "${p}"/chirpstack_*.deb )
+  local zab_root=( "${DIR_V4}"/zabbix-agent2_*.deb )
+  local zab_sub=( "${p}"/zabbix-agent2_*.deb )
   shopt -u nullglob
-  [[ ${#gwb[@]} -ge 1 ]] || { echo "  Нет: chirpstack-gateway-bridge_*.deb"; ok=1; }
-  [[ ${#cs[@]} -ge 1 ]]  || { echo "  Нет: chirpstack_*.deb"; ok=1; }
-  [[ ${#zab[@]} -ge 1 ]] || { echo "  Нет: zabbix-agent2_*.deb"; ok=1; }
+  [[ ${#gwb[@]} -ge 1 ]] || { echo "  Нет: ${sub}/chirpstack-gateway-bridge_*.deb"; ok=1; }
+  [[ ${#cs[@]} -ge 1 ]]  || { echo "  Нет: ${sub}/chirpstack_*.deb"; ok=1; }
+  if [[ ${#zab_root[@]} -ge 1 ]] || [[ ${#zab_sub[@]} -ge 1 ]]; then
+    :
+  else
+    echo "  Нет: zabbix-agent2_*.deb (в корне v4 или в ${sub}/)"
+    ok=1
+  fi
   return "$ok"
 }
 
@@ -99,6 +109,17 @@ choose_arch() {
   esac
 }
 
+# Подкаталог с deb пакетами v4: amd или arm (лежат в chirpstackv4&zabbix - install/amd|arm).
+v4_chirp_deb_subdir() {
+  local arch
+  arch="$(choose_arch)"
+  case "$arch" in
+    amd64) echo "amd" ;;
+    arm64) echo "arm" ;;
+    *) die "Неподдерживаемая архитектура для v4: $arch" ;;
+  esac
+}
+
 prepare_v3_packages() {
   local arch src
   arch="$(choose_arch)"
@@ -114,81 +135,33 @@ prepare_v3_packages() {
   cp -f "${src}"/chirpstack-application-server_*.deb "$DIR_V3"/
 }
 
-prepare_v4_packages() {
-  local arch src
-  arch="$(choose_arch)"
-  case "$arch" in
-    amd64) src="${DIR_V4}/amd" ;;
-    arm64) src="${DIR_V4}/arm" ;;
-    *) die "Неподдерживаемая архитектура для v4: $arch" ;;
-  esac
-  [[ -d "$src" ]] || die "Каталог с пакетами не найден: $src"
-  echo ">>> Подготовка пакетов v4 из: $src"
-  cp -f "${src}"/chirpstack_*.deb "$DIR_V4"/
-  cp -f "${src}"/chirpstack-gateway-bridge_*.deb "$DIR_V4"/
-}
-
-# Пакеты ChirpStack 4.11.x для миграции v3 -> v4 (см. chirp411-amd / chirp411-arm).
-prepare_v411_packages() {
-  local arch src_411 src_zab
-  arch="$(choose_arch)"
-  case "$arch" in
-    amd64)
-      src_411="${DIR_V4}/chirp411-amd"
-      src_zab="${DIR_V4}/amd"
-      ;;
-    arm64)
-      src_411="${DIR_V4}/chirp411-arm"
-      src_zab="${DIR_V4}/arm"
-      ;;
-    *) die "Неподдерживаемая архитектура для 4.11: $arch" ;;
-  esac
-  [[ -d "$src_411" ]] || die "Каталог с пакетами ChirpStack 4.11 не найден: $src_411
-Положите туда chirpstack_*.deb и chirpstack-gateway-bridge_*.deb версии 4.11.x."
-
-  shopt -s nullglob
-  local cs=( "${src_411}"/chirpstack_*.deb )
-  local gwb=( "${src_411}"/chirpstack-gateway-bridge_*.deb )
-  shopt -u nullglob
-  [[ ${#cs[@]} -ge 1 ]] || die "В $src_411 должен лежать пакет chirpstack_*.deb (4.11.x)."
-  [[ ${#gwb[@]} -ge 1 ]] || die "В $src_411 должен лежать пакет chirpstack-gateway-bridge_*.deb."
-
-  echo ">>> Подготовка пакетов ChirpStack 4.11 для миграции из: $src_411"
-  # Убираем старые chirp-деб из корня, чтобы dpkg -i не подхватил другую версию.
-  shopt -s nullglob
-  rm -f "${DIR_V4}"/chirpstack_*.deb "${DIR_V4}"/chirpstack-gateway-bridge_*.deb
-  shopt -u nullglob
-  cp -f "${src_411}"/chirpstack_*.deb "$DIR_V4"/
-  cp -f "${src_411}"/chirpstack-gateway-bridge_*.deb "$DIR_V4"/
-
-  # Zabbix для fast_razvertkav4.sh — из обычной папки архитектуры, если там есть .deb
-  if [[ -d "$src_zab" ]]; then
-    shopt -s nullglob
-    local zab=( "${src_zab}"/zabbix-agent2_*.deb )
-    shopt -u nullglob
-    if [[ ${#zab[@]} -ge 1 ]]; then
-      cp -f "${src_zab}"/zabbix-agent2_*.deb "$DIR_V4"/
-    fi
-  fi
-}
-
+# Миграция v3→4.11: те же amd/arm, в имени chirpstack_*.deb должно быть 4.11.
 check_v411_migration_packages() {
+  local sub="${1:?}"
+  local p="${DIR_V4}/${sub}"
   local ok=0
+  [[ -d "$p" ]] || { echo "  Нет каталога: $p"; return 1; }
   shopt -s nullglob
-  local gwb=( "${DIR_V4}"/chirpstack-gateway-bridge_*.deb )
-  local cs=( "${DIR_V4}"/chirpstack_*.deb )
-  local zab=( "${DIR_V4}"/zabbix-agent2_*.deb )
+  local gwb=( "${p}"/chirpstack-gateway-bridge_*.deb )
+  local cs=( "${p}"/chirpstack_*.deb )
+  local zab_root=( "${DIR_V4}"/zabbix-agent2_*.deb )
+  local zab_sub=( "${p}"/zabbix-agent2_*.deb )
   shopt -u nullglob
-  [[ ${#gwb[@]} -ge 1 ]] || { echo "  Нет: chirpstack-gateway-bridge_*.deb"; ok=1; }
-  [[ ${#cs[@]} -ge 1 ]]  || { echo "  Нет: chirpstack_*.deb"; ok=1; }
-  [[ ${#zab[@]} -ge 1 ]] || { echo "  Нет: zabbix-agent2_*.deb (положите в корень v4 или в amd/arm)"; ok=1; }
-  if [[ "$ok" -eq 0 ]] && [[ ${#cs[@]} -gt 0 ]]; then
+  [[ ${#gwb[@]} -ge 1 ]] || { echo "  Нет: ${sub}/chirpstack-gateway-bridge_*.deb"; ok=1; }
+  [[ ${#cs[@]} -ge 1 ]]  || { echo "  Нет: ${sub}/chirpstack_*.deb"; ok=1; }
+  if [[ ${#zab_root[@]} -ge 1 ]] || [[ ${#zab_sub[@]} -ge 1 ]]; then
+    :
+  else
+    echo "  Нет: zabbix-agent2_*.deb (в корне v4 или в ${sub}/)"
+    ok=1
+  fi
+  if [[ "$ok" -eq 0 ]]; then
     local f
     for f in "${cs[@]}"; do
       case "$f" in
         *4.11*) ;;
         *)
-          echo "  Ожидался пакет ChirpStack 4.11.x, подозрительное имя: $f"
+          echo "  Для миграции нужен chirpstack 4.11.x (в имени файла должно быть 4.11): $f"
           ok=1
           ;;
       esac
@@ -219,14 +192,15 @@ run_v3() {
 
 run_v4() {
   [[ -d "$DIR_V4" ]] || die "Каталог не найден: $DIR_V4"
-  prepare_v4_packages
-  echo "Проверка .deb в: $DIR_V4"
-  if ! check_v4_packages; then
-    die "Не найдены обязательные .deb в каталоге установки v4."
+  local deb_sub
+  deb_sub="$(v4_chirp_deb_subdir)"
+  echo "Проверка .deb в: ${DIR_V4}/${deb_sub} (zabbix — в корне v4 или в ${deb_sub}/)"
+  if ! check_v4_packages "$deb_sub"; then
+    die "Не найдены обязательные .deb для v4."
   fi
   echo
-  echo ">>> Запуск установки ChirpStack v4 (fast_razvertkav4.sh)..."
-  ( cd "$DIR_V4" && bash ./fast_razvertkav4.sh )
+  echo ">>> Запуск установки ChirpStack v4 (fast_razvertkav4.sh, CHIRPSTACK_DEB_DIR=${deb_sub})..."
+  ( cd "$DIR_V4" && CHIRPSTACK_DEB_DIR="$deb_sub" bash ./fast_razvertkav4.sh )
 }
 
 detect_installed_chirpstack() {
@@ -309,10 +283,11 @@ upgrade_v3_to_v4() {
 Для этого сценария нужна только 4.11.x. Удалите или замените пакет chirpstack вручную, затем повторите."
   fi
 
-  prepare_v411_packages
-  echo "Проверка .deb для миграции в: $DIR_V4"
-  if ! check_v411_migration_packages; then
-    die "Не хватает пакетов для миграции (нужны ChirpStack 4.11.x в chirp411-amd/arm и zabbix-agent2 в корне или amd/arm)."
+  local deb_sub
+  deb_sub="$(v4_chirp_deb_subdir)"
+  echo "Проверка пакетов миграции (ChirpStack 4.11.x) в: ${DIR_V4}/${deb_sub}"
+  if ! check_v411_migration_packages "$deb_sub"; then
+    die "Не хватает пакетов: положите chirpstack_4.11*.deb и gateway-bridge в ${deb_sub}/, zabbix — в корне v4 или в ${deb_sub}/."
   fi
 
   if [[ -n "$BACKUP_DIR_OVERRIDE" ]]; then
@@ -330,8 +305,8 @@ upgrade_v3_to_v4() {
 
   cs_ver="$(chirpstack_dpkg_version)"
   if [[ -z "$cs_ver" ]] || [[ ! "$cs_ver" =~ ^4\.11\. ]]; then
-    echo ">>> Установка ChirpStack 4.11 и окружения (fast_razvertkav4.sh)..."
-    ( cd "$DIR_V4" && bash ./fast_razvertkav4.sh )
+    echo ">>> Установка ChirpStack 4.11 и окружения (fast_razvertkav4.sh, пакеты из ${deb_sub}/)..."
+    ( cd "$DIR_V4" && CHIRPSTACK_DEB_DIR="$deb_sub" bash ./fast_razvertkav4.sh )
   else
     echo ">>> ChirpStack 4.11.x уже установлен ($cs_ver), шаг fast_razvertkav4.sh пропущен."
   fi
@@ -451,7 +426,7 @@ show_help() {
 Режимы:
   --v3           Установка ChirpStack v3
   --v4           Установка ChirpStack v4
-  --upgrade      Миграция v3 -> ChirpStack 4.11.x (пакеты из chirp411-amd/arm)
+  --upgrade      Миграция v3 -> ChirpStack 4.11.x (пакеты 4.11 в amd/ или arm/)
   --remove       Выборочное удаление компонентов
 
 Опции:
