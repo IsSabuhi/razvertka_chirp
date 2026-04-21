@@ -7,7 +7,7 @@
 - Устанавливает и настраивает ChirpStack v3 или v4.
 - Настраивает сопутствующие сервисы: PostgreSQL, Mosquitto, Redis.
 - Ставит и настраивает Zabbix Agent2.
-- Поддерживает миграцию `v3 -> ChirpStack 4.11.x` (пакеты 4.11 лежат в `amd/` или `arm/` рядом с остальными).
+- Поддерживает миграцию `v3 -> ChirpStack 4.11.x`: ядро из каталога `chirpstackv4.11.1_install/`, bridge — из `chirpstackv4&zabbix_install/amd|arm/`.
 - Поддерживает выборочное удаление компонентов.
 
 ## Точка входа
@@ -27,7 +27,7 @@ sudo ./install.sh
 # Установка v4 под amd64
 sudo ./install.sh --v4 --arch amd64
 
-# Миграция v3 -> 4.11 (положите chirpstack 4.11 в arm/ или amd/)
+# Миграция v3 -> 4.11 (пакеты уже в репозитории, см. структуру ниже)
 sudo ./install.sh --upgrade --arch arm64 --backup-dir /var/backups/chirpstack
 
 # Удаление в режиме флагов (вопросы останутся, если не добавлять --yes)
@@ -56,7 +56,7 @@ sudo ./install.sh --remove
 ```text
 razvertka/
 ├── install.sh
-├── chirpstackv3&zabbix - install/
+├── chirpstackv3&zabbix_install/
 │   ├── fast_razvertka.sh
 │   ├── zabbix_agent2.conf
 │   ├── zabbix-agent2_*.deb
@@ -69,7 +69,7 @@ razvertka/
 │       ├── chirpstack-gateway-bridge_*.deb
 │       ├── chirpstack-network-server_*.deb
 │       └── chirpstack-application-server_*.deb
-├── chirpstackv4&zabbix - install/
+├── chirpstackv4&zabbix_install/
 │   ├── fast_razvertkav4.sh
 │   ├── zabbix_agent2.conf
 │   ├── zabbix-agent2_*.deb
@@ -80,6 +80,9 @@ razvertka/
 │   └── arm/
 │       ├── chirpstack_*.deb
 │       └── chirpstack-gateway-bridge_*.deb
+├── chirpstackv4.11.1_install/
+│   ├── chirpstack_*_linux_amd64.deb
+│   └── chirpstack_*_linux_arm64.deb
 └── LoraMes/
     ├── Lora.py
     ├── start.sh
@@ -94,24 +97,23 @@ razvertka/
 
 ## Важно про `.deb` пакеты
 
-Скрипты `fast_razvertka.sh` и `fast_razvertkav4.sh` устанавливают пакеты по шаблонам из текущего каталога (например `dpkg -i chirpstack_*.deb`).
+В репозитории уже зафиксированы каталоги и имена; `install.sh` читает их как есть (ничего перекладывать пользователю не нужно).
 
-Это значит:
-
-- Для **v3** скрипт копирует `.deb` из `chirpv3x64` / `chirpv3ARM` в корень каталога установки v3 (как раньше).
-- Для **v4** и для **миграции v3→4.11** пакеты ChirpStack берутся **напрямую** из подкаталога `amd` или `arm` (копирование в корень не требуется); `install.sh` передаёт путь через переменную `CHIRPSTACK_DEB_DIR`.
-- Zabbix Agent2: `zabbix-agent2_*.deb` может лежать в **корне** `chirpstackv4&zabbix - install/` или в том же `amd`/`arm`.
+- **v3:** `install.sh` копирует `.deb` из `chirpv3x64` / `chirpv3ARM` в корень `chirpstackv3&zabbix_install/`, затем запускается `fast_razvertka.sh`.
+- **v4 (обычная установка):** пакеты под архитектуру берутся из `chirpstackv4&zabbix_install/amd` или `arm`; передаётся `CHIRPSTACK_DEB_DIR=amd|arm`.
+- **Миграция v3→4.11:** `chirpstack-gateway-bridge_*.deb` из `amd`/`arm`, пакет ядра `chirpstack_*.deb` — из `chirpstackv4.11.1_install/` (отдельно от «текущей» v4 в amd/arm). В `fast_razvertkav4.sh` используются `CHIRPSTACK_GATEWAY_DEB_DIR` и `CHIRPSTACK_CORE_DEB_DIR`.
+- **Zabbix:** `zabbix-agent2_*.deb` в корне `chirpstackv4&zabbix_install/` или рядом с пакетами ChirpStack.
 
 ## Как обновлять версии пакетов
 
 ### ChirpStack v3
 
-1. Положить новые `.deb` в `chirpstackv3&zabbix - install/chirpv3x64` или `chirpv3ARM`.
+1. Обновить `.deb` в `chirpstackv3&zabbix_install/chirpv3x64` или `chirpv3ARM`.
 2. Запустить `install.sh`, выбрать установку v3 и архитектуру пакетов.
 
 ### ChirpStack v4
 
-1. Положить новые `.deb` в `chirpstackv4&zabbix - install/amd` или `arm`.
+1. Обновить `.deb` в `chirpstackv4&zabbix_install/amd` или `arm`.
 2. Запустить `install.sh`, выбрать установку v4 и архитектуру пакетов.
 
 ### Zabbix Agent2
@@ -120,31 +122,25 @@ razvertka/
 
 ## Миграция с v3 на ChirpStack 4.11
 
-Через `install.sh` выберите пункт миграции v3 → 4.11 или запустите `sudo ./install.sh --upgrade`.
+Через `install.sh` — пункт миграции или `sudo ./install.sh --upgrade`.
 
-Положите пакеты **ChirpStack 4.11.x** в каталог архитектуры, который выберет скрипт:
+Используются **готовые** каталоги репозитория:
 
-- `chirpstackv4&zabbix - install/amd/` — для amd64;
-- `chirpstackv4&zabbix - install/arm/` — для arm64.
+- `chirpstackv4&zabbix_install/amd/` или `arm/` — **только** `chirpstack-gateway-bridge_*.deb` (и при необходимости zabbix там же);
+- `chirpstackv4.11.1_install/` — пакет ядра `chirpstack_*_linux_amd64.deb` или `chirpstack_*_linux_arm64.deb` (версия 4.11.x, в имени есть `4.11`);
+- `zabbix-agent2_*.deb` — обычно в корне `chirpstackv4&zabbix_install/`.
 
-В каталоге должны быть как минимум:
+Так в `amd`/`arm` может лежать актуальная полная v4 (например 4.17) для обычной установки, а для миграции ядро берётся отдельно из `chirpstackv4.11.1_install/`.
 
-- `chirpstack_*.deb` (в имени файла должно быть **`4.11`** — так проверяет скрипт);
-- `chirpstack-gateway-bridge_*.deb`.
+Сценарий:
 
-`zabbix-agent2_*.deb` — в корне `chirpstackv4&zabbix - install/` или в том же `amd`/`arm`.
+- проверяет стек v3;
+- если `chirpstack` уже **4.11.x**, шаг `fast_razvertkav4.sh` **пропускается**;
+- иначе — `fast_razvertkav4.sh` с `CHIRPSTACK_GATEWAY_DEB_DIR=amd|arm` и `CHIRPSTACK_CORE_DEB_DIR=<каталог 4.11.1>`;
+- останавливает v3, бэкап БД;
+- запускает `chirpstack-v3-to-v4` (в `PATH` или `tools/chirpstack-v3-to-v4`).
 
-В папке `amd`/`arm` не держите одновременно два разных `chirpstack_*.deb` (например 4.11 и 4.17), иначе `dpkg` может установить не то.
-
-Сценарий делает:
-
-- проверку, что установлен только стек v3;
-- если пакет `chirpstack` уже **4.11.x**, полная установка `fast_razvertkav4.sh` **пропускается** (остаётся миграция);
-- иначе — `fast_razvertkav4.sh` с `CHIRPSTACK_DEB_DIR=amd|arm` (зависимости, PostgreSQL, конфиги, установка 4.11 из этой папки);
-- остановку сервисов v3, бэкап БД `lora_as` / `lora_ns`;
-- запуск миграции через утилиту `chirpstack-v3-to-v4` (в `PATH` или `tools/chirpstack-v3-to-v4`).
-
-После успешной миграции при необходимости обновите `chirpstack` до более новой v4 уже из папок `amd`/`arm`.
+После миграции при необходимости обновите `chirpstack` до новой v4 из `amd`/`arm`.
 
 ## Выборочное удаление
 

@@ -80,22 +80,25 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm;
 CREATE EXTENSION IF NOT EXISTS hstore;
 EOF
 
-# Пакеты ChirpStack: по умолчанию из текущего каталога, иначе CHIRPSTACK_DEB_DIR (например amd или arm).
-CHIRP_DEB_DIR="${CHIRPSTACK_DEB_DIR:-.}"
-echo "Установка ChirpStack v4 из локальных .deb (каталог относительно скрипта: ${CHIRP_DEB_DIR})..."
-# ВАЖНО: Для v4 нужны только два пакета:
-# • chirpstack_*.deb (объединяет NS+AS+API)
-# • chirpstack-gateway-bridge_*.deb (для шлюзов)
+# Пакеты ChirpStack:
+# • CHIRPSTACK_DEB_DIR — один каталог и для bridge, и для core (по умолчанию .)
+# • либо отдельно: CHIRPSTACK_GATEWAY_DEB_DIR (bridge) и CHIRPSTACK_CORE_DEB_DIR (chirpstack_*.deb), для миграции v3→4.11
+CHIRP_GATE_DIR="${CHIRPSTACK_GATEWAY_DEB_DIR:-${CHIRPSTACK_DEB_DIR:-.}}"
+CHIRP_CORE_DIR="${CHIRPSTACK_CORE_DEB_DIR:-${CHIRPSTACK_DEB_DIR:-.}}"
+echo "Установка ChirpStack v4 из локальных .deb"
+echo "  gateway-bridge: ${CHIRP_GATE_DIR}"
+echo "  chirpstack:    ${CHIRP_CORE_DIR}"
+# ВАЖНО: два пакета — chirpstack_*.deb и chirpstack-gateway-bridge_*.deb
 shopt -s nullglob
-GATE=( "${CHIRP_DEB_DIR}"/chirpstack-gateway-bridge_*.deb )
-CS=( "${CHIRP_DEB_DIR}"/chirpstack_*.deb )
+GATE=( "${CHIRP_GATE_DIR}"/chirpstack-gateway-bridge_*.deb )
+CS=( "${CHIRP_CORE_DIR}"/chirpstack_*.deb )
 shopt -u nullglob
 if [[ ${#GATE[@]} -lt 1 ]]; then
-    echo "Ошибка: не найден chirpstack-gateway-bridge_*.deb в ${CHIRP_DEB_DIR}" >&2
+    echo "Ошибка: не найден chirpstack-gateway-bridge_*.deb в ${CHIRP_GATE_DIR}" >&2
     exit 1
 fi
 if [[ ${#CS[@]} -lt 1 ]]; then
-    echo "Ошибка: не найден chirpstack_*.deb в ${CHIRP_DEB_DIR}" >&2
+    echo "Ошибка: не найден chirpstack_*.deb в ${CHIRP_CORE_DIR}" >&2
     exit 1
 fi
 dpkg -i "${GATE[@]}"
@@ -251,7 +254,10 @@ echo "Установка Zabbix Agent2 из локального .deb..."
 shopt -s nullglob
 ZAB=( ./zabbix-agent2_*.deb )
 if [[ ${#ZAB[@]} -eq 0 ]]; then
-    ZAB=( "${CHIRP_DEB_DIR}"/zabbix-agent2_*.deb )
+    ZAB=( "${CHIRP_GATE_DIR}"/zabbix-agent2_*.deb )
+fi
+if [[ ${#ZAB[@]} -eq 0 ]]; then
+    ZAB=( "${CHIRP_CORE_DIR}"/zabbix-agent2_*.deb )
 fi
 shopt -u nullglob
 if [[ ${#ZAB[@]} -lt 1 ]]; then
