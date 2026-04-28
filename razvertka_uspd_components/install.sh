@@ -350,9 +350,9 @@ install_zabbix_component() {
 
 choose_chirp_version() {
   local answer default="2"
-  echo "Выберите версию ChirpStack для установки:"
-  echo "  1) v3"
-  echo "  2) v4"
+  echo "Выберите версию ChirpStack для установки:" >&2
+  echo "  1) v3" >&2
+  echo "  2) v4" >&2
   read -r -p "Введите номер версии (1=v3, 2=v4) [${default}]: " answer
   answer="${answer:-$default}"
   case "$answer" in
