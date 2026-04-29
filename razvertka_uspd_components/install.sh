@@ -21,6 +21,8 @@ CHIRPSTACK_MIGRATOR_VER="${CHIRPSTACK_MIGRATOR_VER:-4.0.11}"
 SKIP_MIGRATOR_DOWNLOAD="${SKIP_MIGRATOR_DOWNLOAD:-0}"
 # Перед миграцией данных передать мигратору --drop-tenants-and-users (очищает пользователей/тенантов в БД v4; только если понятна потеря данных).
 CHIRPSTACK_MIGRATOR_DROP_TENANTS_AND_USERS="${CHIRPSTACK_MIGRATOR_DROP_TENANTS_AND_USERS:-0}"
+# Перед мигратором пересоздать пустую БД chirpstack (v4), чтобы не было конфликтов idx_user_email / частичного переноса.
+CHIRPSTACK_MIGRATION_CLEAR_V4_DB="${CHIRPSTACK_MIGRATION_CLEAR_V4_DB:-1}"
 
 COMPONENT_INSTALL_DEPS="${COMPONENTS_DIR}/install-deps.sh"
 COMPONENT_INSTALL_MOSQUITTO="${COMPONENTS_DIR}/install-mosquitto.sh"
@@ -492,6 +494,29 @@ backup_v3_databases() {
   echo "  - $ns_dump"
 }
 
+# Пустая БД chirpstack (v4) без старых пользователей/следов прошлой миграции.
+recreate_chirpstack_v4_database_for_migration() {
+  echo ">>> Останавливаем ChirpStack 4.11 перед пересозданием БД..."
+  systemctl stop chirpstack chirpstack-gateway-bridge 2>/dev/null || true
+  echo ">>> Пересоздаём пустую БД «chirpstack» для миграции v3 -> v4..."
+  sudo -u postgres psql -v ON_ERROR_STOP=1 <<'SQL'
+SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'chirpstack' AND pid <> pg_backend_pid();
+DROP DATABASE IF EXISTS chirpstack;
+DO $migr$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'chirpstack') THEN
+    CREATE ROLE chirpstack LOGIN PASSWORD 'chirpstack';
+  END IF;
+END
+$migr$;
+CREATE DATABASE chirpstack OWNER chirpstack;
+\c chirpstack
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE EXTENSION IF NOT EXISTS hstore;
+SQL
+  echo ">>> БД «chirpstack» очищена (новая пустая база с расширениями)."
+}
+
 run_v3_to_v4_migration() {
   local migrator=""
   local cs_version_output=""
@@ -592,7 +617,18 @@ upgrade_v3_to_v4() {
     echo ">>> ChirpStack 4.11.x уже установлен ($cs_ver), шаг fast_razvertkav4.sh пропущен."
   fi
 
+  if [[ "${CHIRPSTACK_MIGRATION_CLEAR_V4_DB}" == "1" ]]; then
+    recreate_chirpstack_v4_database_for_migration
+  else
+    echo ">>> CHIRPSTACK_MIGRATION_CLEAR_V4_DB=0 — пересоздание БД «chirpstack» пропущено. Останавливаем сервисы 4.11 перед мигратором."
+    systemctl stop chirpstack chirpstack-gateway-bridge 2>/dev/null || true
+  fi
+
   run_v3_to_v4_migration
+
+  echo ">>> Запуск сервисов ChirpStack 4.11..."
+  systemctl start chirpstack chirpstack-gateway-bridge
+  systemctl is-active --quiet chirpstack && echo "chirpstack: active" || true
 
   echo ">>> Миграция v3 -> ChirpStack 4.11 завершена."
 }
@@ -719,6 +755,7 @@ show_help() {
   --yes          Авто-ответ "yes" на вопросы подтверждения
   --skip-migrator-download  Не скачивать chirpstack-v3-to-v4 с GitHub (нужен локальный tools/chirpstack-v3-to-v4)
   --migrator-drop-tenants-and-users  Передать мигратору --drop-tenants-and-users (см. справку chirpstack-v3-to-v4 -h)
+  --skip-clear-v4-db         Не пересоздавать пустую БД «chirpstack» перед миграцией (по умолчанию БД очищается)
   -h, --help     Показать справку
 
 Переменные окружения:
@@ -726,6 +763,7 @@ show_help() {
   SKIP_MIGRATOR_DOWNLOAD=1  То же, что --skip-migrator-download
   CHIRPSTACK_MIGRATOR_DROP_TENANTS_AND_USERS=1  То же, что --migrator-drop-tenants-and-users
   CHIRPSTACK_MIGRATOR_BIN     Явный путь к мигратору (если не задан — берётся из tools/ автоматически)
+  CHIRPSTACK_MIGRATION_CLEAR_V4_DB=0  То же, что --skip-clear-v4-db
 
 Примеры:
   sudo ./install.sh --v4 --arch amd64
@@ -780,6 +818,10 @@ parse_args() {
         ;;
       --migrator-drop-tenants-and-users)
         CHIRPSTACK_MIGRATOR_DROP_TENANTS_AND_USERS=1
+        shift
+        ;;
+      --skip-clear-v4-db)
+        CHIRPSTACK_MIGRATION_CLEAR_V4_DB=0
         shift
         ;;
       -h|--help)

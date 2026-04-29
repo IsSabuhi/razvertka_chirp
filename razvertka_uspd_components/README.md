@@ -103,21 +103,21 @@ razvertka_uspd_components/
 - останавливает сервисы v3;
 - делает бэкап `lora_as` и `lora_ns`;
 - ставит/проверяет ChirpStack 4.11;
-- запускает `chirpstack-v3-to-v4` без дополнительных флагов (набор флагов зависит от версии бинарника; смотри `tools/chirpstack-v3-to-v4 -h`).
+- **по умолчанию** пересоздаёт пустую БД PostgreSQL `chirpstack` (v4), чтобы убрать конфликты `idx_user_email` и следы прошлых попыток;
+- запускает `chirpstack-v3-to-v4` (доп. флаги — по версии бинарника; смотри `tools/chirpstack-v3-to-v4 -h`);
+- поднимает `chirpstack` и `chirpstack-gateway-bridge`.
 
 **Какой бинарник используется:** скрипт сам выставляет `CHIRPSTACK_MIGRATOR_BIN`, если в `tools/` есть `chirpstack-v3-to-v4` или другой файл по маске `chirpstack-v3-to-v4*` (ручной `export` не нужен). Иначе: переменная окружения `CHIRPSTACK_MIGRATOR_BIN`, затем скачивание с GitHub, в последнюю очередь — `chirpstack-v3-to-v4` из `PATH`.
 
-Если мигратор падает с `idx_user_email`, в БД v4 уже есть пользователи с теми же email (частичная прошлая миграция или вход в UI). Варианты:
+Отключить пересоздание БД `chirpstack` (если в v4 уже лежат нужные данные — редко):
 
-1. Запуск с очисткой tenants/users в v4 перед миграцией (разрушительно для уже созданных в v4 учёток):
+```bash
+sudo ./install.sh --upgrade --skip-clear-v4-db
+```
 
-   ```bash
-   sudo ./install.sh --upgrade --migrator-drop-tenants-and-users
-   ```
+Дополнительно к пересозданию БД можно передать мигратору `--drop-tenants-and-users`: `sudo ./install.sh --upgrade --migrator-drop-tenants-and-users`.
 
-2. Вручную очистить конфликтующие строки в PostgreSQL или пересоздать пустую БД `chirpstack` после бэкапа, затем повторить миграцию.
-
-Примечание: флаг `--update-existing` есть не во всех сборках `chirpstack-v3-to-v4`; текущий релиз с GitHub может его не поддерживать.
+Примечание: флаг `--update-existing` есть не во всех сборках `chirpstack-v3-to-v4`.
 
 ## Перед запуском
 
