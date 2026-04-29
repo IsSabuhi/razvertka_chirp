@@ -2,7 +2,7 @@
 
 Главная рабочая папка: `razvertka_uspd_components`.
 
-`install.sh` — оркестратор: задаёт пути, подключает модули из `scripts/lib/razvertka-*.sh` и вызывает `scripts/components/*` при установке пакетов.
+`install.sh` — основной файл: задаёт пути, подключает модули из `scripts/lib/razvertka-*.sh` и вызывает `scripts/components/*` при установке пакетов.
 
 - полный стек (`v3` или `v4`);
 - установка отдельных компонентов;
@@ -52,7 +52,7 @@ sudo ./install.sh --remove
 
 ## Актуальная структура
 
-**Архитектура кода:** `install.sh` только задаёт пути, подключает `scripts/lib/razvertka-*.sh` (логика) и для установки .deb вызывает `scripts/components/*.sh`. Обёртки `scripts/backup-databases.sh` и т.д. — тонкие прокси к `install.sh` с соответствующим флагом (дублирования кода нет).
+**Архитектура кода:** `install.sh` только задаёт пути, подключает `scripts/lib/razvertka-*.sh` (логика) и для установки .deb вызывает `scripts/components/*.sh`.
 
 | Модуль `scripts/lib/` | Назначение |
 |----------------------|------------|
