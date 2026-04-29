@@ -105,7 +105,7 @@ razvertka_uspd_components/
 - ставит/проверяет ChirpStack 4.11;
 - запускает `chirpstack-v3-to-v4` без дополнительных флагов (набор флагов зависит от версии бинарника; смотри `tools/chirpstack-v3-to-v4 -h`).
 
-**Какой бинарник используется:** сначала `CHIRPSTACK_MIGRATOR_BIN` (если задан), затем `tools/chirpstack-v3-to-v4` (или `tools/chirpstack-v3-to-v4*`), затем при необходимости скачивание с GitHub, в последнюю очередь — `chirpstack-v3-to-v4` из `PATH`. Положи свой мигратор в `razvertka_uspd_components/tools/` — он будет приоритетнее системного.
+**Какой бинарник используется:** скрипт сам выставляет `CHIRPSTACK_MIGRATOR_BIN`, если в `tools/` есть `chirpstack-v3-to-v4` или другой файл по маске `chirpstack-v3-to-v4*` (ручной `export` не нужен). Иначе: переменная окружения `CHIRPSTACK_MIGRATOR_BIN`, затем скачивание с GitHub, в последнюю очередь — `chirpstack-v3-to-v4` из `PATH`.
 
 Если мигратор падает с `idx_user_email`, в БД v4 уже есть пользователи с теми же email (частичная прошлая миграция или вход в UI). Варианты:
 

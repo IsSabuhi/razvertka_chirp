@@ -29,6 +29,27 @@ COMPONENT_INSTALL_POSTGRESQL="${COMPONENTS_DIR}/install-postgresql.sh"
 COMPONENT_INSTALL_CHIRPSTACK="${COMPONENTS_DIR}/install-chirpstack.sh"
 COMPONENT_INSTALL_ZABBIX="${COMPONENTS_DIR}/install-zabbix.sh"
 
+# Локальный мигратор в tools/: без ручного export — подставляем CHIRPSTACK_MIGRATOR_BIN сами.
+_tools_m_dir="${SCRIPT_DIR}/tools"
+if [[ -z "${CHIRPSTACK_MIGRATOR_BIN:-}" ]]; then
+  _m_found=""
+  if [[ -f "${_tools_m_dir}/chirpstack-v3-to-v4" ]]; then
+    _m_found="${_tools_m_dir}/chirpstack-v3-to-v4"
+  else
+    shopt -s nullglob
+    for _f in "${_tools_m_dir}"/chirpstack-v3-to-v4*; do
+      [[ -f "$_f" ]] || continue
+      _m_found="${_f}"
+      break
+    done
+    shopt -u nullglob
+  fi
+  if [[ -n "${_m_found}" ]]; then
+    [[ -x "${_m_found}" ]] || chmod +x "${_m_found}" 2>/dev/null || true
+    export CHIRPSTACK_MIGRATOR_BIN="${_m_found}"
+  fi
+fi
+
 die() {
   echo "Ошибка: $*" >&2
   exit 1
@@ -704,7 +725,7 @@ show_help() {
   CHIRPSTACK_MIGRATOR_VER   Версия релиза мигратора на GitHub (по умолчанию 4.0.11)
   SKIP_MIGRATOR_DOWNLOAD=1  То же, что --skip-migrator-download
   CHIRPSTACK_MIGRATOR_DROP_TENANTS_AND_USERS=1  То же, что --migrator-drop-tenants-and-users
-  CHIRPSTACK_MIGRATOR_BIN     Полный путь к своему бинарнику мигратора (иначе: tools/chirpstack-v3-to-v4)
+  CHIRPSTACK_MIGRATOR_BIN     Явный путь к мигратору (если не задан — берётся из tools/ автоматически)
 
 Примеры:
   sudo ./install.sh --v4 --arch amd64
