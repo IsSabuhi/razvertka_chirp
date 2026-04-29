@@ -2,11 +2,14 @@
 
 Главная рабочая папка: `razvertka_uspd_components`.
 
-`install.sh` — оркестратор установки:
+`install.sh` — оркестратор: задаёт пути, подключает модули из `scripts/lib/razvertka-*.sh` и вызывает `scripts/components/*` при установке пакетов.
+
 - полный стек (`v3` или `v4`);
 - установка отдельных компонентов;
 - миграция `v3 -> ChirpStack 4.11`;
-- выборочное удаление.
+- бэкап, статус, выборочное удаление (неинтерактивные флаги см. `--help`).
+
+Дополнительные имена-обёртки (эквиваленты `install.sh` с флагом): `scripts/backup-databases.sh`, `scripts/show-install-status.sh`, `scripts/remove-stack.sh`, `scripts/upgrade-v3-to-v4.sh`.
 
 ## Точка входа
 
