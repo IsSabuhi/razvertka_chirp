@@ -25,6 +25,17 @@ if [[ "$VERSION" == "v3" ]]; then
   dpkg -i "${GWB[@]}"
   dpkg -i "${NS[@]}"
   dpkg -i "${AS[@]}"
+
+  echo ">>> Настройка DSN для ChirpStack v3 (lora_ns / lora_as)..."
+  NS_TOML="/etc/chirpstack-network-server/chirpstack-network-server.toml"
+  AS_TOML="/etc/chirpstack-application-server/chirpstack-application-server.toml"
+  if [[ -f "$NS_TOML" ]]; then
+    sed -i 's|dsn[[:space:]]*=[[:space:]]*"[^"]*"|dsn="postgres://lora_ns:lora_ns@localhost/lora_ns?sslmode=disable"|' "$NS_TOML"
+  fi
+  if [[ -f "$AS_TOML" ]]; then
+    sed -i 's|dsn[[:space:]]*=[[:space:]]*"[^"]*"|dsn="postgres://lora_as:lora_as@localhost/lora_as?sslmode=disable"|' "$AS_TOML"
+  fi
+
   systemctl enable chirpstack-gateway-bridge chirpstack-network-server chirpstack-application-server
   systemctl restart chirpstack-gateway-bridge chirpstack-network-server chirpstack-application-server
 else
