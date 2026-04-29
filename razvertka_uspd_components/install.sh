@@ -16,6 +16,8 @@ ARCH_OVERRIDE=""
 ACTION=""
 AUTO_YES=0
 BACKUP_DIR_OVERRIDE=""
+# Только вместе с --remove: снять пакеты одной ветки ChirpStack (v3: NS+AS, опц. GWB; v4: core+GWB).
+REMOVE_CHIRP_ONLY="${REMOVE_CHIRP_ONLY:-}"
 # Версия релиза утилиты https://github.com/chirpstack/chirpstack-v3-to-v4 (тег v4.0.11 → 4.0.11)
 CHIRPSTACK_MIGRATOR_VER="${CHIRPSTACK_MIGRATOR_VER:-4.0.11}"
 SKIP_MIGRATOR_DOWNLOAD="${SKIP_MIGRATOR_DOWNLOAD:-0}"
@@ -759,7 +761,83 @@ purge_if_installed() {
   fi
 }
 
+# Только v3: NS+AS. GWB снимается, только если пакет chirpstack (v4) не установлен (у v4 тот же bridge).
+remove_chirpstack_debs_v3() {
+  local have_v4=0
+  dpkg -s chirpstack >/dev/null 2>&1 && have_v4=1
+  systemctl stop chirpstack-network-server chirpstack-application-server 2>/dev/null || true
+  if [[ "$have_v4" -eq 0 ]]; then
+    systemctl stop chirpstack-gateway-bridge 2>/dev/null || true
+  fi
+  purge_if_installed "chirpstack-network-server"
+  purge_if_installed "chirpstack-application-server"
+  if [[ "$have_v4" -eq 0 ]]; then
+    purge_if_installed "chirpstack-gateway-bridge"
+  else
+    echo ">>> Пакет chirpstack (v4) остаётся — gateway-bridge не снимаем (общий пакет)."
+  fi
+}
+
+# Только v4: ядро + GWB, пакеты v3 не трогаем
+remove_chirpstack_debs_v4() {
+  systemctl stop chirpstack chirpstack-gateway-bridge 2>/dev/null || true
+  purge_if_installed "chirpstack"
+  purge_if_installed "chirpstack-gateway-bridge"
+}
+
+remove_stack_chirp_only() {
+  local which="${1:?}"
+  case "$which" in
+    v3)
+      if ! dpkg -s chirpstack-network-server >/dev/null 2>&1 && ! dpkg -s chirpstack-application-server >/dev/null 2>&1; then
+        echo "Пакеты ChirpStack v3 (network / application) не найдены — снимать нечего."
+        return 0
+      fi
+      ;;
+    v4)
+      if ! dpkg -s chirpstack >/dev/null 2>&1; then
+        echo "Пакет chirpstack (v4) не установлен — снимать нечего."
+        return 0
+      fi
+      ;;
+  esac
+  echo "ВНИМАНИЕ: снимаются только пакеты ChirpStack $which; остальной стек (Zabbix, Mosquitto, ост. ветка Chirp) не трогается."
+  if ! ask_yes_no "Продолжить?"; then
+    echo "Отменено."
+    return 0
+  fi
+  if [[ "$which" == "v3" ]]; then
+    remove_chirpstack_debs_v3
+    if ask_yes_no "Удалить в PostgreSQL БД lora_as и lora_ns (v3)? (БД chirpstack (v4) не трогаем)"; then
+      echo ">>> DROP lora_as, lora_ns"
+      sudo -u postgres psql -v ON_ERROR_STOP=1 <<'EOF'
+DROP DATABASE IF EXISTS lora_as;
+DROP DATABASE IF EXISTS lora_ns;
+EOF
+    fi
+  else
+    remove_chirpstack_debs_v4
+    if ask_yes_no "Удалить в PostgreSQL БД chirpstack (v4) и роль chirpstack? (БД lora_* (v3) не трогаем)"; then
+      echo ">>> DROP chirpstack, role chirpstack"
+      sudo -u postgres psql -v ON_ERROR_STOP=1 <<'EOF'
+DROP DATABASE IF EXISTS chirpstack;
+DROP ROLE IF EXISTS chirpstack;
+EOF
+    fi
+  fi
+  echo ">>> Снятие пакетов ChirpStack $which завершено."
+}
+
 remove_stack() {
+  if [[ "${REMOVE_CHIRP_ONLY}" == "v3" ]]; then
+    remove_stack_chirp_only "v3"
+    return
+  fi
+  if [[ "${REMOVE_CHIRP_ONLY}" == "v4" ]]; then
+    remove_stack_chirp_only "v4"
+    return
+  fi
+
   echo "ВНИМАНИЕ: этот режим удаляет выбранные компоненты."
   if ! ask_yes_no "Продолжить удаление?"; then
     echo "Удаление отменено."
@@ -857,6 +935,8 @@ show_help() {
   --upgrade      Миграция v3 -> 4.11 (ядро: chirpstackv4/chirpstackv4_11, bridge: chirpstackv4/chirpstackv4_17/amd|arm)
   --backup       Сделать pg_dump БД: lora_as, lora_ns, chirpstack (всё, что есть в PostgreSQL)
   --remove       Выборочное удаление компонентов
+  --only-chirp v3|v4  Вместе с --remove: только пакеты v3 (NS+AS) или только v4 (chirpstack+GWB); без --remove — ошибка
+                      (v3+GWB снимается, только если пакет chirpstack (v4) не установлен — GWB тогда общий)
 
 Опции:
   --arch VALUE   auto|amd64|arm64
@@ -879,6 +959,8 @@ show_help() {
   sudo ./install.sh --upgrade --arch arm64 --backup-dir /var/backups/chirpstack
   sudo ./install.sh --backup --backup-dir /var/backups/chirpstack
   sudo ./install.sh --remove
+  sudo ./install.sh --remove --only-chirp v3
+  sudo ./install.sh --remove --only-chirp v4 --yes
 EOF
 }
 
@@ -934,6 +1016,15 @@ parse_args() {
         CHIRPSTACK_MIGRATION_CLEAR_V4_DB=0
         shift
         ;;
+      --only-chirp)
+        shift
+        [[ $# -gt 0 ]] || die "После --only-chirp укажите: v3 или v4."
+        case "$1" in
+          v3|v4) REMOVE_CHIRP_ONLY="$1" ;;
+          *) die "После --only-chirp ожидается v3 или v4, получено: $1" ;;
+        esac
+        shift
+        ;;
       -h|--help)
         show_help
         exit 0
@@ -958,6 +1049,12 @@ parse_args() {
         die "Неизвестный компонент: ${component_name} (допустимо: deps|mosquitto|redis|postgresql|chirpstack|zabbix)."
         ;;
     esac
+  fi
+  if [[ -n "$REMOVE_CHIRP_ONLY" && -n "$ACTION" && "$ACTION" != "remove" ]]; then
+    die "Опция --only-chirp v3|v4 сочетается только с режимом --remove, не с --${ACTION}."
+  fi
+  if [[ -n "$REMOVE_CHIRP_ONLY" && -z "$ACTION" ]]; then
+    die "С --only-chirp v3|v4 используйте: sudo $0 --remove --only-chirp v3|v4"
   fi
 }
 
