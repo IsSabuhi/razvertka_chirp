@@ -517,6 +517,68 @@ SQL
   echo ">>> БД «chirpstack» очищена (новая пустая база с расширениями)."
 }
 
+# Есть ли уже схема 4.11 (таблица user)
+v4_chirpstack_user_table_exists() {
+  local r
+  r="$(sudo -u postgres psql -d chirpstack -tAc "SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'user' LIMIT 1" 2>/dev/null || true)"
+  [[ "$r" == "1" ]]
+}
+
+# Мигратор v3->v4 требует, чтобы в БД chirpstack уже существовали таблицы (chirpstack 4.11 накатывает схему при первом старте).
+# После пустой БД: поднять сервис, дождаться таблицы user, остановить, очистить сиды, не трогая служебные таблицы *migration*.
+chirpstack_bootstrap_v4_schema_for_migrator() {
+  local do_strip_seeds="${1:-0}"
+  echo ">>> Создаём схему ChirpStack 4.11: первый запуск сервиса (миграции SQL)…"
+  systemctl start mosquitto redis-server 2>/dev/null || true
+  systemctl start postgresql 2>/dev/null || true
+  systemctl start chirpstack
+  local i=0
+  while [[ $i -lt 120 ]]; do
+    if v4_chirpstack_user_table_exists; then
+      echo ">>> Схема готова (public.user существует)."
+      break
+    fi
+    if ! systemctl is-active --quiet chirpstack; then
+      systemctl stop chirpstack 2>/dev/null || true
+      die "Сервис chirpstack остановился до готовности схемы. Смотрите: journalctl -u chirpstack -n 80"
+    fi
+    sleep 1
+    i=$((i + 1))
+  done
+  if ! v4_chirpstack_user_table_exists; then
+    systemctl stop chirpstack 2>/dev/null || true
+    die "Таймаут: за 120 с не появилась public.user. Проверьте dsn в /etc/chirpstack/chirpstack.toml, PostgreSQL и: journalctl -u chirpstack -n 80"
+  fi
+  systemctl stop chirpstack 2>/dev/null || true
+
+  if [[ "$do_strip_seeds" == "1" ]]; then
+    echo ">>> Очищаем тестовые/дефолтные данные (таблицы *migration* не трогаем)…"
+    sudo -u postgres psql -d chirpstack -v ON_ERROR_STOP=1 <<'SQL'
+DO $$
+DECLARE
+  q   text;
+  t   text;
+  agg text;
+BEGIN
+  SELECT coalesce(
+    string_agg('public.' || format('%I', tablename), ', ' ORDER BY tablename),
+    ''
+  ) INTO agg
+  FROM pg_tables
+  WHERE schemaname = 'public'
+    AND lower(tablename) NOT LIKE '%migration%';
+  IF coalesce(agg, '') = '' THEN
+    RAISE NOTICE 'Нет таблиц для TRUNCATE';
+    RETURN;
+  END IF;
+  q := 'TRUNCATE ' || agg || ' RESTART IDENTITY CASCADE';
+  RAISE NOTICE '%', q;
+  EXECUTE q;
+END $$;
+SQL
+  fi
+}
+
 run_v3_to_v4_migration() {
   local migrator=""
   local cs_version_output=""
@@ -619,9 +681,14 @@ upgrade_v3_to_v4() {
 
   if [[ "${CHIRPSTACK_MIGRATION_CLEAR_V4_DB}" == "1" ]]; then
     recreate_chirpstack_v4_database_for_migration
+    chirpstack_bootstrap_v4_schema_for_migrator 1
   else
     echo ">>> CHIRPSTACK_MIGRATION_CLEAR_V4_DB=0 — пересоздание БД «chirpstack» пропущено. Останавливаем сервисы 4.11 перед мигратором."
     systemctl stop chirpstack chirpstack-gateway-bridge 2>/dev/null || true
+    if ! v4_chirpstack_user_table_exists; then
+      echo ">>> Схема 4.11 в БД не найдена, создаём (первый старт chirpstack)…"
+      chirpstack_bootstrap_v4_schema_for_migrator 0
+    fi
   fi
 
   run_v3_to_v4_migration

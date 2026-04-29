@@ -104,6 +104,7 @@ razvertka_uspd_components/
 - делает бэкап `lora_as` и `lora_ns`;
 - ставит/проверяет ChirpStack 4.11;
 - **по умолчанию** пересоздаёт пустую БД PostgreSQL `chirpstack` (v4), чтобы убрать конфликты `idx_user_email` и следы прошлых попыток;
+- поднимает `chirpstack` до появления схемы (таблица `public.user`), останавливает, затем очищает данные во всех `public` таблицах, **кроме** имён с `migration` (служебные миграции не трогаем) — иначе мигратор падает с `отношение "user" не существует`;
 - запускает `chirpstack-v3-to-v4` (доп. флаги — по версии бинарника; смотри `tools/chirpstack-v3-to-v4 -h`);
 - поднимает `chirpstack` и `chirpstack-gateway-bridge`.
 
