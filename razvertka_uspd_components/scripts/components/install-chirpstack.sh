@@ -26,24 +26,50 @@ if [[ "$VERSION" == "v3" ]]; then
   dpkg -i "${NS[@]}"
   dpkg -i "${AS[@]}"
 
-  echo ">>> Настройка DSN для ChirpStack v3 (lora_ns / lora_as)..."
+  echo ">>> Настройка конфигурации ChirpStack v3..."
   NS_TOML="/etc/chirpstack-network-server/chirpstack-network-server.toml"
   AS_TOML="/etc/chirpstack-application-server/chirpstack-application-server.toml"
+  GB_TOML="/etc/chirpstack-gateway-bridge/chirpstack-gateway-bridge.toml"
+
+  if [[ -f "$GB_TOML" ]]; then
+    sed -i 's/^[[:space:]]*log_level[[:space:]]*=.*/log_level=2/' "$GB_TOML"
+    sed -i 's/^[[:space:]]*log_to_syslog[[:space:]]*=.*/log_to_syslog=true/' "$GB_TOML"
+    sed -i 's/marshaler="[^"]*"/marshaler="json"/' "$GB_TOML"
+  fi
+
   if [[ -f "$NS_TOML" ]]; then
+    sed -i 's/^[[:space:]]*log_level[[:space:]]*=.*/log_level=2/' "$NS_TOML"
+    sed -i 's/^[[:space:]]*log_to_syslog[[:space:]]*=.*/log_to_syslog=true/' "$NS_TOML"
     sed -i 's|dsn[[:space:]]*=[[:space:]]*"[^"]*"|dsn="postgres://lora_ns:lora_ns@localhost/lora_ns?sslmode=disable"|' "$NS_TOML"
   fi
   if [[ -f "$AS_TOML" ]]; then
+    sed -i 's/^[[:space:]]*log_level[[:space:]]*=.*/log_level=2/' "$AS_TOML"
+    sed -i 's/^[[:space:]]*log_to_syslog[[:space:]]*=.*/log_to_syslog=true/' "$AS_TOML"
+    sed -i 's/marshaler="[^"]*"/marshaler="json"/' "$AS_TOML"
     sed -i 's|dsn[[:space:]]*=[[:space:]]*"[^"]*"|dsn="postgres://lora_as:lora_as@localhost/lora_as?sslmode=disable"|' "$AS_TOML"
     if command -v openssl >/dev/null 2>&1; then
       JWT_SECRET="$(openssl rand -base64 32 | tr -d '\n')"
-      if rg -n '^[[:space:]]*jwt_secret[[:space:]]*=' "$AS_TOML" >/dev/null 2>&1; then
+      if grep -Eq '^[[:space:]]*jwt_secret[[:space:]]*=' "$AS_TOML"; then
         sed -i "s|^[[:space:]]*jwt_secret[[:space:]]*=.*|jwt_secret=\"${JWT_SECRET}\"|" "$AS_TOML"
       else
-        printf '\njwt_secret="%s"\n' "$JWT_SECRET" >> "$AS_TOML"
+        # Для v3 jwt_secret должен быть в секции external_api.
+        if grep -Eq '^[[:space:]]*\[application_server\.external_api\]' "$AS_TOML"; then
+          sed -i "/^[[:space:]]*\[application_server\.external_api\]/a jwt_secret=\"${JWT_SECRET}\"" "$AS_TOML"
+        else
+          printf '\n[application_server.external_api]\njwt_secret="%s"\n' "$JWT_SECRET" >> "$AS_TOML"
+        fi
       fi
     fi
   fi
 
+  MOSQUITTO_CONF="/etc/mosquitto/mosquitto.conf"
+  if [[ -f "$MOSQUITTO_CONF" ]]; then
+    grep -Fxq "listener 1883" "$MOSQUITTO_CONF" || echo "listener 1883" >> "$MOSQUITTO_CONF"
+    grep -Fxq "allow_anonymous true" "$MOSQUITTO_CONF" || echo "allow_anonymous true" >> "$MOSQUITTO_CONF"
+  fi
+
+  systemctl enable mosquitto redis-server postgresql
+  systemctl restart mosquitto redis-server
   systemctl enable chirpstack-gateway-bridge chirpstack-network-server chirpstack-application-server
   systemctl restart chirpstack-gateway-bridge chirpstack-network-server chirpstack-application-server
 else
