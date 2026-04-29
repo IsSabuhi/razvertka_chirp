@@ -34,6 +34,14 @@ if [[ "$VERSION" == "v3" ]]; then
   fi
   if [[ -f "$AS_TOML" ]]; then
     sed -i 's|dsn[[:space:]]*=[[:space:]]*"[^"]*"|dsn="postgres://lora_as:lora_as@localhost/lora_as?sslmode=disable"|' "$AS_TOML"
+    if command -v openssl >/dev/null 2>&1; then
+      JWT_SECRET="$(openssl rand -base64 32 | tr -d '\n')"
+      if rg -n '^[[:space:]]*jwt_secret[[:space:]]*=' "$AS_TOML" >/dev/null 2>&1; then
+        sed -i "s|^[[:space:]]*jwt_secret[[:space:]]*=.*|jwt_secret=\"${JWT_SECRET}\"|" "$AS_TOML"
+      else
+        printf '\njwt_secret="%s"\n' "$JWT_SECRET" >> "$AS_TOML"
+      fi
+    fi
   fi
 
   systemctl enable chirpstack-gateway-bridge chirpstack-network-server chirpstack-application-server
