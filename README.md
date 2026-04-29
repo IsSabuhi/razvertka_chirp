@@ -7,9 +7,9 @@
 - полный стек (`v3` или `v4`);
 - установка отдельных компонентов;
 - миграция `v3 -> ChirpStack 4.11`;
-- бэкап, статус, выборочное удаление (неинтерактивные флаги см. `--help`).
+- бэкап, статус, перезапуск служб, выборочное удаление (флаги см. `--help`).
 
-Дополнительные имена-обёртки (эквиваленты `install.sh` с флагом): `scripts/backup-databases.sh`, `scripts/show-install-status.sh`, `scripts/remove-stack.sh`, `scripts/upgrade-v3-to-v4.sh`.
+Дополнительные имена-обёртки (эквиваленты `install.sh` с флагом): `scripts/backup-databases.sh`, `scripts/show-install-status.sh`, `scripts/remove-stack.sh`, `scripts/upgrade-v3-to-v4.sh`, `scripts/restart-services.sh`.
 
 ## Точка входа
 
@@ -41,7 +41,7 @@ sudo ./install.sh --remove
 
 ## Флаги
 
-- `--v3` / `--v4` / `--full` / `--upgrade` / `--backup` / `--status` / `--remove` — выбрать один режим.
+- `--v3` / `--v4` / `--full` / `--upgrade` / `--backup` / `--status` / `--restart-services` / `--remove` — выбрать один режим.
 - `--component <deps|mosquitto|redis|postgresql|chirpstack|zabbix>` — установить один компонент.
 - `--chirp-version <v3|v4>` — обязателен для `postgresql|chirpstack|zabbix`.
 - `--arch auto|amd64|arm64` — архитектура пакетов.
@@ -64,6 +64,8 @@ sudo ./install.sh --remove
 | `razvertka-migration.sh` | Миграция v3 → 4.11 |
 | `razvertka-remove.sh` | Удаление / `--only-chirp` |
 | `razvertka-run.sh` | `run_v3`/`v4`, меню компонентов |
+| `razvertka-chirpstack-v4-secret.sh` | `[api].secret` в `chirpstack.toml` |
+| `razvertka-restart.sh` | `--restart-services` |
 
 ```text
 razvertka_uspd_components/
@@ -75,14 +77,17 @@ razvertka_uspd_components/
 │   ├── show-install-status.sh
 │   ├── remove-stack.sh
 │   ├── upgrade-v3-to-v4.sh
+│   ├── restart-services.sh
 │   ├── lib/
 │   │   ├── razvertka-common.sh
 │   │   ├── razvertka-migrator.sh
 │   │   ├── razvertka-install-fns.sh
 │   │   ├── razvertka-backup.sh
 │   │   ├── razvertka-status.sh
+│   │   ├── razvertka-chirpstack-v4-secret.sh
 │   │   ├── razvertka-migration.sh
 │   │   ├── razvertka-remove.sh
+│   │   ├── razvertka-restart.sh
 │   │   └── razvertka-run.sh
 │   └── components/           # установка пакетов (dpkg, конфиги)
 │       ├── install-deps.sh
@@ -116,6 +121,15 @@ razvertka_uspd_components/
     ├── zabbix-release_*.deb
     └── zabbix_agent2.conf
 ```
+
+## ChirpStack v4: `api.secret` (`chirpstack.toml`)
+
+В секции `[api]` поле `secret` нужно для JWT веб-интерфейса и API (см. [документацию ChirpStack](https://www.chirpstack.io/docs/chirpstack/configuration.html)). Скрипт выставляет его автоматически при установке v4, миграции v3→4.11 и при `install-chirpstack.sh` v4:
+
+- если на машине ещё есть `/etc/chirpstack-application-server/chirpstack-application-server.toml` с `jwt_secret` (v3), **то же значение** записывается в v4 как `[api].secret` — удобно после миграции (один ключ подписи JWT);
+- иначе генерируется **новый** секрет (`openssl rand -base64 32`).
+
+**Новый секрет не портит данные в PostgreSQL** (устройства, приложения, записи). Меняется только подпись токенов: пользователям и интеграциям с API обычно нужно **заново войти в UI** или **выпустить новые API-токены**. Произвольная смена `secret` в будущем по документации ChirpStack аннулирует все текущие логины/API-токены.
 
 ## Откуда берутся пакеты
 

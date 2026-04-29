@@ -179,10 +179,12 @@ upgrade_v3_to_v4() {
     [[ ${#core[@]} -ge 1 ]] || die "Не найден chirpstack_*.deb в ${DIR_V411}/${deb_sub}"
     dpkg -i "${gwb[@]}"
     dpkg -i "${core[@]}"
+    configure_chirpstack_v4_api_secret
     systemctl enable chirpstack chirpstack-gateway-bridge
     systemctl restart chirpstack chirpstack-gateway-bridge
   else
     echo ">>> ChirpStack 4.11.x уже установлен ($cs_ver), шаг fast_razvertkav4.sh пропущен."
+    configure_chirpstack_v4_api_secret
   fi
 
   if [[ "${CHIRPSTACK_MIGRATION_CLEAR_V4_DB}" == "1" ]]; then

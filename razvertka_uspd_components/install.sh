@@ -60,8 +60,10 @@ source "${LIB}/razvertka-migrator.sh"
 source "${LIB}/razvertka-install-fns.sh"
 source "${LIB}/razvertka-backup.sh"
 source "${LIB}/razvertka-status.sh"
+source "${LIB}/razvertka-chirpstack-v4-secret.sh"
 source "${LIB}/razvertka-migration.sh"
 source "${LIB}/razvertka-remove.sh"
+source "${LIB}/razvertka-restart.sh"
 source "${LIB}/razvertka-run.sh"
 
 show_menu() {
@@ -80,7 +82,7 @@ show_help() {
   sudo ./install.sh [опции]
 
   Реализация: каталог scripts/lib/ (модули razvertka-*.sh). Те же режимы можно вызвать
-  через scripts/backup-databases.sh, show-install-status.sh, remove-stack.sh, upgrade-v3-to-v4.sh (обёртки).
+  через scripts/backup-databases.sh, show-install-status.sh, remove-stack.sh, upgrade-v3-to-v4.sh, restart-services.sh (обёртки).
 
 Режимы:
   --v3           Установка ChirpStack v3
@@ -94,6 +96,7 @@ show_help() {
   --remove       Выборочное удаление компонентов
   --only-chirp v3|v4  Вместе с --remove: только пакеты v3 (NS+AS) или только v4 (chirpstack+GWB); без --remove — ошибка
                       (v3+GWB снимается, только если пакет chirpstack (v4) не установлен — GWB тогда общий)
+  --restart-services Упорядоченный перезапуск postgres/redis/mosquitto/ChirpStack/zabbix
 
 Опции:
   --arch VALUE   auto|amd64|arm64
@@ -119,6 +122,7 @@ show_help() {
   sudo ./install.sh --remove --only-chirp v3
   sudo ./install.sh --remove --only-chirp v4 --yes
   sudo ./install.sh --status
+  sudo ./install.sh --restart-services
 EOF
 }
 
@@ -127,15 +131,15 @@ parse_args() {
   local component_name=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --v3|--v4|--full|--upgrade|--backup|--status|--remove)
-        [[ -n "$ACTION" ]] && die "Укажите только один режим (--v3|--v4|--full|--upgrade|--backup|--status|--remove|--component)."
+      --v3|--v4|--full|--upgrade|--backup|--status|--remove|--restart-services)
+        [[ -n "$ACTION" ]] && die "Укажите только один режим (--v3|--v4|--full|--upgrade|--backup|--status|--restart-services|--remove|--component)."
         ACTION="${1#--}"
         shift
         ;;
       --component)
         shift
         [[ $# -gt 0 ]] || die "После --component нужно указать значение."
-        [[ -n "$ACTION" ]] && die "Укажите только один режим (--v3|--v4|--full|--upgrade|--backup|--status|--remove|--component)."
+        [[ -n "$ACTION" ]] && die "Укажите только один режим (--v3|--v4|--full|--upgrade|--backup|--status|--restart-services|--remove|--component)."
         ACTION="component"
         component_name="$1"
         shift
@@ -239,6 +243,7 @@ main() {
       upgrade) upgrade_v3_to_v4 ;;
       backup) run_database_backup ;;
       status) show_install_status ;;
+      restart-services) restart_stack_services ;;
       remove) remove_stack ;;
       *) die "Неизвестный режим: $ACTION" ;;
     esac
@@ -255,6 +260,7 @@ main() {
     "Удаление (ChirpStack/Zabbix, опционально БД и данные)"
     "Бэкап БД PostgreSQL (lora_as, lora_ns, chirpstack — что есть)"
     "Показать, что установлено (пакеты, сервисы, БД)"
+    "Перезапуск служб стека (PostgreSQL, Redis, Mosquitto, ChirpStack, Zabbix)"
     "Выход"
   )
   select _ in "${options[@]}"; do
@@ -284,6 +290,10 @@ main() {
         break
         ;;
       7)
+        restart_stack_services
+        break
+        ;;
+      8)
         echo "Выход."
         exit 0
         ;;

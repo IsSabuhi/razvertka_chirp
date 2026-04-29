@@ -84,6 +84,10 @@ else
   echo ">>> Установка ChirpStack v4 (только пакеты)..."
   dpkg -i "${GWB[@]}"
   dpkg -i "${CS[@]}"
+  _LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)"
+  # shellcheck source=../lib/razvertka-chirpstack-v4-secret.sh
+  source "${_LIB}/razvertka-chirpstack-v4-secret.sh"
+  configure_chirpstack_v4_api_secret
   systemctl enable chirpstack-gateway-bridge chirpstack
   systemctl restart chirpstack-gateway-bridge chirpstack
 fi
