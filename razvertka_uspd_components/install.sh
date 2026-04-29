@@ -247,20 +247,52 @@ download_migrator_to_tools() {
 }
 
 resolve_migrator_binary() {
-  local p="${SCRIPT_DIR}/tools/chirpstack-v3-to-v4"
-  if command -v chirpstack-v3-to-v4 >/dev/null 2>&1; then
-    echo "chirpstack-v3-to-v4"
+  # Приоритет: явный путь → файлы в ./tools → скачивание → команда из PATH.
+  local tools_dir="${SCRIPT_DIR}/tools"
+  local p_default="${tools_dir}/chirpstack-v3-to-v4"
+  local f cand
+
+  if [[ -n "${CHIRPSTACK_MIGRATOR_BIN:-}" ]]; then
+    if [[ -x "${CHIRPSTACK_MIGRATOR_BIN}" ]]; then
+      echo "${CHIRPSTACK_MIGRATOR_BIN}"
+      return 0
+    fi
+    die "CHIRPSTACK_MIGRATOR_BIN задан, но не исполняемый файл: ${CHIRPSTACK_MIGRATOR_BIN}"
+  fi
+
+  mkdir -p "$tools_dir"
+
+  if [[ -f "$p_default" ]] && [[ ! -x "$p_default" ]]; then
+    chmod +x "$p_default" 2>/dev/null || true
+  fi
+  if [[ -x "$p_default" ]]; then
+    echo "$p_default"
     return 0
   fi
-  if [[ -x "$p" ]]; then
-    echo "$p"
-    return 0
-  fi
+
+  shopt -s nullglob
+  for f in "${tools_dir}"/chirpstack-v3-to-v4*; do
+    [[ -f "$f" ]] || continue
+    [[ -x "$f" ]] || chmod +x "$f" 2>/dev/null || true
+    if [[ -x "$f" ]]; then
+      shopt -u nullglob
+      echo "$f"
+      return 0
+    fi
+  done
+  shopt -u nullglob
+
   if [[ "$SKIP_MIGRATOR_DOWNLOAD" == "1" ]]; then
     return 1
   fi
-  if download_migrator_to_tools && [[ -x "$p" ]]; then
-    echo "$p"
+  if download_migrator_to_tools && [[ -x "$p_default" ]]; then
+    echo "$p_default"
+    return 0
+  fi
+
+  cand="$(command -v chirpstack-v3-to-v4 2>/dev/null || true)"
+  if [[ -n "$cand" ]]; then
+    echo "$cand"
     return 0
   fi
   return 1
@@ -672,6 +704,7 @@ show_help() {
   CHIRPSTACK_MIGRATOR_VER   Версия релиза мигратора на GitHub (по умолчанию 4.0.11)
   SKIP_MIGRATOR_DOWNLOAD=1  То же, что --skip-migrator-download
   CHIRPSTACK_MIGRATOR_DROP_TENANTS_AND_USERS=1  То же, что --migrator-drop-tenants-and-users
+  CHIRPSTACK_MIGRATOR_BIN     Полный путь к своему бинарнику мигратора (иначе: tools/chirpstack-v3-to-v4)
 
 Примеры:
   sudo ./install.sh --v4 --arch amd64
