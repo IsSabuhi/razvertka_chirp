@@ -157,15 +157,15 @@ check_v411_migration_packages() {
   local gwb=( "${p}"/chirpstack-gateway-bridge_*.deb )
   local cs=()
   case "$sub" in
-    amd) cs=( "${DIR_V411}"/chirpstack_*_linux_amd64.deb ) ;;
-    arm) cs=( "${DIR_V411}"/chirpstack_*_linux_arm64.deb ) ;;
+    amd) cs=( "${DIR_V411}/amd"/chirpstack_*_linux_amd64.deb ) ;;
+    arm) cs=( "${DIR_V411}/arm"/chirpstack_*_linux_arm64.deb ) ;;
     *) echo "  Внутренняя ошибка: sub=$sub"; return 1 ;;
   esac
   local zab_root=( "${DIR_ZABBIX}"/zabbix-agent2_*.deb )
   shopt -u nullglob
   [[ ${#gwb[@]} -ge 1 ]] || { echo "  Нет: ${sub}/chirpstack-gateway-bridge_*.deb"; ok=1; }
   [[ ${#cs[@]} -ge 1 ]]  || {
-    echo "  Нет пакета ядра в ${DIR_V411} (нужен chirpstack_*_linux_amd64.deb или chirpstack_*_linux_arm64.deb)"
+    echo "  Нет пакета ядра в ${DIR_V411}/${sub} (нужен chirpstack_*_linux_amd64.deb или chirpstack_*_linux_arm64.deb)"
     ok=1
   }
   if [[ ${#zab_root[@]} -ge 1 ]]; then
