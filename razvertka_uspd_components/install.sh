@@ -494,6 +494,47 @@ backup_v3_databases() {
   echo "  - $ns_dump"
 }
 
+# Есть ли БД в кластере PostgreSQL (имена фиксированы: lora_as, lora_ns, chirpstack)
+postgres_db_exists() {
+  local name="${1:?}"
+  local r
+  r="$(sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname = '$name'" 2>/dev/null || true)"
+  [[ "$r" == "1" ]]
+}
+
+# Бэкап всех известных БД ChirpStack: lora_as, lora_ns (v3), chirpstack (v4) — что есть.
+run_database_backup() {
+  local backup_dir=""
+  if [[ -n "$BACKUP_DIR_OVERRIDE" ]]; then
+    backup_dir="$BACKUP_DIR_OVERRIDE"
+    echo "Каталог для бэкапов БД: $backup_dir"
+  elif [[ "$AUTO_YES" -eq 1 ]]; then
+    backup_dir="$BACKUP_DIR_DEFAULT"
+    echo "Каталог для бэкапов БД: $backup_dir"
+  else
+    read -r -p "Каталог для бэкапов БД [${BACKUP_DIR_DEFAULT}]: " backup_dir
+    backup_dir="${backup_dir:-$BACKUP_DIR_DEFAULT}"
+  fi
+  mkdir -p "$backup_dir"
+  local ts
+  ts="$(date +%Y%m%d_%H%M%S)"
+  local any=0
+  echo ">>> Создаём SQL-дампы в: $backup_dir"
+  for db in lora_as lora_ns chirpstack; do
+    if postgres_db_exists "$db"; then
+      local f="${backup_dir}/${db}_${ts}.sql"
+      echo ">>> pg_dump: $db"
+      sudo -u postgres pg_dump "$db" >"$f"
+      echo "  - $f"
+      any=1
+    fi
+  done
+  if [[ "$any" -eq 0 ]]; then
+    die "В PostgreSQL нет баз lora_as, lora_ns или chirpstack. Нечего бэкапить."
+  fi
+  echo ">>> Бэкап завершён."
+}
+
 # Пустая БД chirpstack (v4) без старых пользователей/следов прошлой миграции.
 recreate_chirpstack_v4_database_for_migration() {
   echo ">>> Останавливаем ChirpStack 4.11 перед пересозданием БД..."
@@ -814,11 +855,12 @@ show_help() {
   --component X  Установка отдельного компонента: deps|mosquitto|redis|postgresql|chirpstack|zabbix
   --chirp-version V  Версия для --component (там, где нужно): v3|v4
   --upgrade      Миграция v3 -> 4.11 (ядро: chirpstackv4/chirpstackv4_11, bridge: chirpstackv4/chirpstackv4_17/amd|arm)
+  --backup       Сделать pg_dump БД: lora_as, lora_ns, chirpstack (всё, что есть в PostgreSQL)
   --remove       Выборочное удаление компонентов
 
 Опции:
   --arch VALUE   auto|amd64|arm64
-  --backup-dir   Каталог для бэкапа БД (для --upgrade)
+  --backup-dir   Каталог для бэкапа БД (для --upgrade и --backup)
   --yes          Авто-ответ "yes" на вопросы подтверждения
   --skip-migrator-download  Не скачивать chirpstack-v3-to-v4 с GitHub (нужен локальный tools/chirpstack-v3-to-v4)
   --migrator-drop-tenants-and-users  Передать мигратору --drop-tenants-and-users (см. справку chirpstack-v3-to-v4 -h)
@@ -835,6 +877,7 @@ show_help() {
 Примеры:
   sudo ./install.sh --v4 --arch amd64
   sudo ./install.sh --upgrade --arch arm64 --backup-dir /var/backups/chirpstack
+  sudo ./install.sh --backup --backup-dir /var/backups/chirpstack
   sudo ./install.sh --remove
 EOF
 }
@@ -844,8 +887,8 @@ parse_args() {
   local component_name=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --v3|--v4|--full|--upgrade|--remove)
-        [[ -n "$ACTION" ]] && die "Укажите только один режим (--v3|--v4|--full|--upgrade|--remove|--component)."
+      --v3|--v4|--full|--upgrade|--backup|--remove)
+        [[ -n "$ACTION" ]] && die "Укажите только один режим (--v3|--v4|--full|--upgrade|--backup|--remove|--component)."
         ACTION="${1#--}"
         shift
         ;;
@@ -939,6 +982,7 @@ main() {
       component:zabbix:v3) install_zabbix_component "v3" ;;
       component:zabbix:v4) install_zabbix_component "v4" ;;
       upgrade) upgrade_v3_to_v4 ;;
+      backup) run_database_backup ;;
       remove) remove_stack ;;
       *) die "Неизвестный режим: $ACTION" ;;
     esac
@@ -953,6 +997,7 @@ main() {
     "Установка отдельного компонента"
     "Миграция v3 -> ChirpStack 4.11 + данные"
     "Удаление (ChirpStack/Zabbix, опционально БД и данные)"
+    "Бэкап БД PostgreSQL (lora_as, lora_ns, chirpstack — что есть)"
     "Выход"
   )
   select _ in "${options[@]}"; do
@@ -974,6 +1019,10 @@ main() {
         break
         ;;
       5)
+        run_database_backup
+        break
+        ;;
+      6)
         echo "Выход."
         exit 0
         ;;
