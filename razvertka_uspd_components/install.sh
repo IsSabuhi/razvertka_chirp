@@ -480,6 +480,95 @@ detect_installed_chirpstack() {
   echo "none"
 }
 
+# Одна строка: пакет dpkg + версия или «нет».
+print_pkg_status_line() {
+  local pkg="${1:?}" label="${2:-$1}"
+  if dpkg -s "$pkg" >/dev/null 2>&1; then
+    local ver
+    ver="$(dpkg -s "$pkg" 2>/dev/null | sed -n 's/^Version: //p' | head -1)"
+    echo "  $label: установлен (версия: $ver)"
+  else
+    echo "  $label: нет"
+  fi
+}
+
+# Состояние unit-файла
+systemd_unit_state() {
+  local u="${1:?}"
+  if ! systemctl cat "$u" &>/dev/null && ! systemctl cat "${u}.service" &>/dev/null; then
+    echo "  $u: — (нет unit)"
+    return
+  fi
+  local st en
+  st="$(systemctl is-active "$u" 2>&1 | head -1 | tr -d '\r')"
+  en="$(systemctl is-enabled "$u" 2>&1 | head -1 | tr -d '\r')"
+  echo "  $u: $st | $en"
+}
+
+# Обзор: пакеты, сервисы, БД.
+show_install_status() {
+  local cs
+  cs="$(detect_installed_chirpstack)"
+  echo "=== Установленные компоненты (razvertka) ==="
+  echo
+  echo "--- ChirpStack (ветка по пакетам) ---"
+  case "$cs" in
+    v3) echo "  Детекция: v3 (установлен chirpstack-network-server)" ;;
+    v4) echo "  Детекция: v4 (установлен пакет chirpstack)" ;;
+    *) echo "  Детекция: пакеты ChirpStack v3/v4 не найдены" ;;
+  esac
+  print_pkg_status_line chirpstack-network-server
+  print_pkg_status_line chirpstack-application-server
+  print_pkg_status_line chirpstack
+  print_pkg_status_line chirpstack-gateway-bridge
+  if [[ "$cs" == "v4" ]] && command -v chirpstack >/dev/null 2>&1; then
+    echo "  Бинарь chirpstack: $(chirpstack --version 2>/dev/null | head -1 | tr -d '\r' || echo '?')"
+  fi
+  echo
+  echo "--- Сопутствующие пакеты ---"
+  print_pkg_status_line zabbix-agent2
+  print_pkg_status_line mosquitto
+  print_pkg_status_line mosquitto-clients
+  print_pkg_status_line redis-server
+  print_pkg_status_line redis-tools
+  if dpkg -s postgresql >/dev/null 2>&1; then
+    print_pkg_status_line postgresql
+  else
+    local pgpkg=""
+    pgpkg="$(dpkg -l 'postgresql-[0-9]*' 2>/dev/null | awk '/^ii/ {print $2; exit}')"
+    if [[ -n "$pgpkg" ]]; then
+      print_pkg_status_line "$pgpkg" "postgresql (сервер, $pgpkg)"
+    else
+      echo "  postgresql: нет (ожидается postgresql или postgresql-NN)"
+    fi
+  fi
+  echo
+  echo "--- Сервисы (active / enabled) ---"
+  systemd_unit_state chirpstack
+  systemd_unit_state chirpstack-gateway-bridge
+  systemd_unit_state chirpstack-network-server
+  systemd_unit_state chirpstack-application-server
+  systemd_unit_state zabbix-agent2
+  systemd_unit_state mosquitto
+  systemd_unit_state redis-server
+  systemd_unit_state postgresql
+  echo
+  echo "--- БД PostgreSQL (lora_as, lora_ns, chirpstack) ---"
+  if sudo -u postgres psql -d postgres -c "SELECT 1" >/dev/null 2>&1; then
+    for db in lora_as lora_ns chirpstack; do
+      if postgres_db_exists "$db"; then
+        echo "  $db: есть"
+      else
+        echo "  $db: нет"
+      fi
+    done
+  else
+    echo "  (нет доступа к PostgreSQL от postgres или кластер не поднят)"
+  fi
+  echo
+  echo "=== конец ==="
+}
+
 backup_v3_databases() {
   local backup_dir="$1"
   mkdir -p "$backup_dir"
@@ -502,6 +591,17 @@ postgres_db_exists() {
   local r
   r="$(sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname = '$name'" 2>/dev/null || true)"
   [[ "$r" == "1" ]]
+}
+
+# Перед DROP DATABASE: разорвать все сессии к этим БД (подключение к postgres)
+postgres_terminate_backends_chirp_dbs() {
+  local d
+  for d in "$@"; do
+    echo ">>> Завершаем сессии к БД «$d»"
+    sudo -u postgres psql -d postgres -q -c \
+      "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$d' AND pid <> pg_backend_pid();" \
+      2>/dev/null || true
+  done
 }
 
 # Бэкап всех известных БД ChirpStack: lora_as, lora_ns (v3), chirpstack (v4) — что есть.
@@ -761,14 +861,20 @@ purge_if_installed() {
   fi
 }
 
-# Только v3: NS+AS. GWB снимается, только если пакет chirpstack (v4) не установлен (у v4 тот же bridge).
-remove_chirpstack_debs_v3() {
+# Только v3: остановить NS/AS (и GWB, если нет v4) — вызывать до DROP БД, чтобы не было сессий к lora_*
+stop_chirpstack_v3_services() {
   local have_v4=0
   dpkg -s chirpstack >/dev/null 2>&1 && have_v4=1
+  echo ">>> Останавливаем сервисы ChirpStack v3 (network / application)…"
   systemctl stop chirpstack-network-server chirpstack-application-server 2>/dev/null || true
   if [[ "$have_v4" -eq 0 ]]; then
     systemctl stop chirpstack-gateway-bridge 2>/dev/null || true
   fi
+}
+
+purge_chirpstack_v3_debs() {
+  local have_v4=0
+  dpkg -s chirpstack >/dev/null 2>&1 && have_v4=1
   purge_if_installed "chirpstack-network-server"
   purge_if_installed "chirpstack-application-server"
   if [[ "$have_v4" -eq 0 ]]; then
@@ -778,9 +884,12 @@ remove_chirpstack_debs_v3() {
   fi
 }
 
-# Только v4: ядро + GWB, пакеты v3 не трогаем
-remove_chirpstack_debs_v4() {
+stop_chirpstack_v4_services() {
+  echo ">>> Останавливаем chirpstack и chirpstack-gateway-bridge…"
   systemctl stop chirpstack chirpstack-gateway-bridge 2>/dev/null || true
+}
+
+purge_chirpstack_v4_debs() {
   purge_if_installed "chirpstack"
   purge_if_installed "chirpstack-gateway-bridge"
 }
@@ -807,23 +916,30 @@ remove_stack_chirp_only() {
     return 0
   fi
   if [[ "$which" == "v3" ]]; then
-    remove_chirpstack_debs_v3
-    if ask_yes_no "Удалить в PostgreSQL БД lora_as и lora_ns (v3)? (БД chirpstack (v4) не трогаем)"; then
-      echo ">>> DROP lora_as, lora_ns"
+    # Сначала остановка и БД, потом purge — иначе postrm/хвосты держат сессии к lora_*.
+    stop_chirpstack_v3_services
+    if ask_yes_no "Удалить в PostgreSQL БД lora_as и lora_ns и роли lora_as, lora_ns? (БД chirpstack (v4) не трогаем)"; then
+      echo ">>> Завершаем сессии, DROP БД и ролей v3"
+      postgres_terminate_backends_chirp_dbs lora_as lora_ns
       sudo -u postgres psql -v ON_ERROR_STOP=1 <<'EOF'
 DROP DATABASE IF EXISTS lora_as;
 DROP DATABASE IF EXISTS lora_ns;
+DROP ROLE IF EXISTS lora_as;
+DROP ROLE IF EXISTS lora_ns;
 EOF
     fi
+    purge_chirpstack_v3_debs
   else
-    remove_chirpstack_debs_v4
-    if ask_yes_no "Удалить в PostgreSQL БД chirpstack (v4) и роль chirpstack? (БД lora_* (v3) не трогаем)"; then
-      echo ">>> DROP chirpstack, role chirpstack"
+    stop_chirpstack_v4_services
+    if ask_yes_no "Удалить в PostgreSQL БД chirpstack и роль chirpstack? (БД lora_* (v3) не трогаем)"; then
+      echo ">>> Завершаем сессии, DROP БД и роли v4"
+      postgres_terminate_backends_chirp_dbs chirpstack
       sudo -u postgres psql -v ON_ERROR_STOP=1 <<'EOF'
 DROP DATABASE IF EXISTS chirpstack;
 DROP ROLE IF EXISTS chirpstack;
 EOF
     fi
+    purge_chirpstack_v4_debs
   fi
   echo ">>> Снятие пакетов ChirpStack $which завершено."
 }
@@ -883,8 +999,9 @@ remove_stack() {
   fi
 
   if ask_yes_no "Удалить БД ChirpStack (chirpstack, lora_as, lora_ns) и роли?"; then
-    echo ">>> Удаляем БД и роли PostgreSQL (если существуют)"
-    sudo -u postgres psql <<'EOF'
+    echo ">>> Удаляем сессии, БД и роли PostgreSQL (если существуют)"
+    postgres_terminate_backends_chirp_dbs chirpstack lora_as lora_ns
+    sudo -u postgres psql -v ON_ERROR_STOP=1 <<'EOF'
 DROP DATABASE IF EXISTS chirpstack;
 DROP DATABASE IF EXISTS lora_as;
 DROP DATABASE IF EXISTS lora_ns;
@@ -934,6 +1051,7 @@ show_help() {
   --chirp-version V  Версия для --component (там, где нужно): v3|v4
   --upgrade      Миграция v3 -> 4.11 (ядро: chirpstackv4/chirpstackv4_11, bridge: chirpstackv4/chirpstackv4_17/amd|arm)
   --backup       Сделать pg_dump БД: lora_as, lora_ns, chirpstack (всё, что есть в PostgreSQL)
+  --status       Показать, какие пакеты/сервисы/БД по этому стеку обнаружены
   --remove       Выборочное удаление компонентов
   --only-chirp v3|v4  Вместе с --remove: только пакеты v3 (NS+AS) или только v4 (chirpstack+GWB); без --remove — ошибка
                       (v3+GWB снимается, только если пакет chirpstack (v4) не установлен — GWB тогда общий)
@@ -961,6 +1079,7 @@ show_help() {
   sudo ./install.sh --remove
   sudo ./install.sh --remove --only-chirp v3
   sudo ./install.sh --remove --only-chirp v4 --yes
+  sudo ./install.sh --status
 EOF
 }
 
@@ -969,15 +1088,15 @@ parse_args() {
   local component_name=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --v3|--v4|--full|--upgrade|--backup|--remove)
-        [[ -n "$ACTION" ]] && die "Укажите только один режим (--v3|--v4|--full|--upgrade|--backup|--remove|--component)."
+      --v3|--v4|--full|--upgrade|--backup|--status|--remove)
+        [[ -n "$ACTION" ]] && die "Укажите только один режим (--v3|--v4|--full|--upgrade|--backup|--status|--remove|--component)."
         ACTION="${1#--}"
         shift
         ;;
       --component)
         shift
         [[ $# -gt 0 ]] || die "После --component нужно указать значение."
-        [[ -n "$ACTION" ]] && die "Укажите только один режим (--v3|--v4|--full|--upgrade|--remove|--component)."
+        [[ -n "$ACTION" ]] && die "Укажите только один режим (--v3|--v4|--full|--upgrade|--backup|--status|--remove|--component)."
         ACTION="component"
         component_name="$1"
         shift
@@ -1080,6 +1199,7 @@ main() {
       component:zabbix:v4) install_zabbix_component "v4" ;;
       upgrade) upgrade_v3_to_v4 ;;
       backup) run_database_backup ;;
+      status) show_install_status ;;
       remove) remove_stack ;;
       *) die "Неизвестный режим: $ACTION" ;;
     esac
@@ -1095,6 +1215,7 @@ main() {
     "Миграция v3 -> ChirpStack 4.11 + данные"
     "Удаление (ChirpStack/Zabbix, опционально БД и данные)"
     "Бэкап БД PostgreSQL (lora_as, lora_ns, chirpstack — что есть)"
+    "Показать, что установлено (пакеты, сервисы, БД)"
     "Выход"
   )
   select _ in "${options[@]}"; do
@@ -1120,6 +1241,10 @@ main() {
         break
         ;;
       6)
+        show_install_status
+        break
+        ;;
+      7)
         echo "Выход."
         exit 0
         ;;
