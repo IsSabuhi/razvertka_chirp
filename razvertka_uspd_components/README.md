@@ -41,7 +41,7 @@ sudo ./install.sh --remove
 
 ## Флаги
 
-- `--v3` / `--v4` / `--full` / `--upgrade` / `--remove` — выбрать один режим.
+- `--v3` / `--v4` / `--full` / `--upgrade` / `--backup` / `--status` / `--remove` — выбрать один режим.
 - `--component <deps|mosquitto|redis|postgresql|chirpstack|zabbix>` — установить один компонент.
 - `--chirp-version <v3|v4>` — обязателен для `postgresql|chirpstack|zabbix`.
 - `--arch auto|amd64|arm64` — архитектура пакетов.
@@ -52,12 +52,39 @@ sudo ./install.sh --remove
 
 ## Актуальная структура
 
+**Архитектура кода:** `install.sh` только задаёт пути, подключает `scripts/lib/razvertka-*.sh` (логика) и для установки .deb вызывает `scripts/components/*.sh`. Обёртки `scripts/backup-databases.sh` и т.д. — тонкие прокси к `install.sh` с соответствующим флагом (дублирования кода нет).
+
+| Модуль `scripts/lib/` | Назначение |
+|----------------------|------------|
+| `razvertka-common.sh` | Пакеты, arch, PostgreSQL, `ask_yes_no` |
+| `razvertka-migrator.sh` | Поиск/загрузка `chirpstack-v3-to-v4` |
+| `razvertka-install-fns.sh` | Вызовы `scripts/components/*` |
+| `razvertka-backup.sh` | Бэкап БД |
+| `razvertka-status.sh` | `--status` |
+| `razvertka-migration.sh` | Миграция v3 → 4.11 |
+| `razvertka-remove.sh` | Удаление / `--only-chirp` |
+| `razvertka-run.sh` | `run_v3`/`v4`, меню компонентов |
+
 ```text
 razvertka_uspd_components/
 ├── install.sh
 ├── README.md
+├── tools/                    # при необходимости: chirpstack-v3-to-v4
 ├── scripts/
-│   └── components/
+│   ├── backup-databases.sh   # → install.sh --backup
+│   ├── show-install-status.sh
+│   ├── remove-stack.sh
+│   ├── upgrade-v3-to-v4.sh
+│   ├── lib/
+│   │   ├── razvertka-common.sh
+│   │   ├── razvertka-migrator.sh
+│   │   ├── razvertka-install-fns.sh
+│   │   ├── razvertka-backup.sh
+│   │   ├── razvertka-status.sh
+│   │   ├── razvertka-migration.sh
+│   │   ├── razvertka-remove.sh
+│   │   └── razvertka-run.sh
+│   └── components/           # установка пакетов (dpkg, конфиги)
 │       ├── install-deps.sh
 │       ├── install-mosquitto.sh
 │       ├── install-redis.sh
