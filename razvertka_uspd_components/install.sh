@@ -19,8 +19,8 @@ BACKUP_DIR_OVERRIDE=""
 # Версия релиза утилиты https://github.com/chirpstack/chirpstack-v3-to-v4 (тег v4.0.11 → 4.0.11)
 CHIRPSTACK_MIGRATOR_VER="${CHIRPSTACK_MIGRATOR_VER:-4.0.11}"
 SKIP_MIGRATOR_DOWNLOAD="${SKIP_MIGRATOR_DOWNLOAD:-0}"
-# Передавать мигратору --update-existing (обновлять существующих пользователей при совпадении email).
-CHIRPSTACK_MIGRATOR_UPDATE_EXISTING="${CHIRPSTACK_MIGRATOR_UPDATE_EXISTING:-1}"
+# Перед миграцией данных передать мигратору --drop-tenants-and-users (очищает пользователей/тенантов в БД v4; только если понятна потеря данных).
+CHIRPSTACK_MIGRATOR_DROP_TENANTS_AND_USERS="${CHIRPSTACK_MIGRATOR_DROP_TENANTS_AND_USERS:-0}"
 
 COMPONENT_INSTALL_DEPS="${COMPONENTS_DIR}/install-deps.sh"
 COMPONENT_INSTALL_MOSQUITTO="${COMPONENTS_DIR}/install-mosquitto.sh"
@@ -465,19 +465,17 @@ run_v3_to_v4_migration() {
 Офлайн без авто-скачивания: export SKIP_MIGRATOR_DOWNLOAD=1 и положите бинарник вручную."
 
   echo ">>> Запуск миграции данных v3 -> v4 через: $migrator"
-  if [[ "${CHIRPSTACK_MIGRATOR_UPDATE_EXISTING}" == "1" ]]; then
-    echo ">>> Параметр мигратора: --update-existing (совпадения пользователей по email обновляются, а не вставляются заново)."
-    "$migrator" \
-      --as-config-file /etc/chirpstack-application-server/chirpstack-application-server.toml \
-      --ns-config-file /etc/chirpstack-network-server/chirpstack-network-server.toml \
-      --cs-config-file /etc/chirpstack/chirpstack.toml \
-      --update-existing
-  else
-    "$migrator" \
-      --as-config-file /etc/chirpstack-application-server/chirpstack-application-server.toml \
-      --ns-config-file /etc/chirpstack-network-server/chirpstack-network-server.toml \
-      --cs-config-file /etc/chirpstack/chirpstack.toml
+  # Флаг --update-existing есть не во всех сборках chirpstack-v3-to-v4; не используем.
+  local migrator_extra=()
+  if [[ "${CHIRPSTACK_MIGRATOR_DROP_TENANTS_AND_USERS}" == "1" ]]; then
+    echo ">>> ВНИМАНИЕ: мигратор запускается с --drop-tenants-and-users (в БД v4 будут удалены существующие tenants/users перед переносом)."
+    migrator_extra+=(--drop-tenants-and-users)
   fi
+  "$migrator" \
+    --as-config-file /etc/chirpstack-application-server/chirpstack-application-server.toml \
+    --ns-config-file /etc/chirpstack-network-server/chirpstack-network-server.toml \
+    --cs-config-file /etc/chirpstack/chirpstack.toml \
+    "${migrator_extra[@]}"
 }
 
 upgrade_v3_to_v4() {
@@ -667,13 +665,13 @@ show_help() {
   --backup-dir   Каталог для бэкапа БД (для --upgrade)
   --yes          Авто-ответ "yes" на вопросы подтверждения
   --skip-migrator-download  Не скачивать chirpstack-v3-to-v4 с GitHub (нужен локальный tools/chirpstack-v3-to-v4)
-  --no-update-existing      Не передавать мигратору --update-existing (по умолчанию флаг включён)
+  --migrator-drop-tenants-and-users  Передать мигратору --drop-tenants-and-users (см. справку chirpstack-v3-to-v4 -h)
   -h, --help     Показать справку
 
 Переменные окружения:
   CHIRPSTACK_MIGRATOR_VER   Версия релиза мигратора на GitHub (по умолчанию 4.0.11)
   SKIP_MIGRATOR_DOWNLOAD=1  То же, что --skip-migrator-download
-  CHIRPSTACK_MIGRATOR_UPDATE_EXISTING=0  То же, что --no-update-existing
+  CHIRPSTACK_MIGRATOR_DROP_TENANTS_AND_USERS=1  То же, что --migrator-drop-tenants-and-users
 
 Примеры:
   sudo ./install.sh --v4 --arch amd64
@@ -726,8 +724,8 @@ parse_args() {
         SKIP_MIGRATOR_DOWNLOAD=1
         shift
         ;;
-      --no-update-existing)
-        CHIRPSTACK_MIGRATOR_UPDATE_EXISTING=0
+      --migrator-drop-tenants-and-users)
+        CHIRPSTACK_MIGRATOR_DROP_TENANTS_AND_USERS=1
         shift
         ;;
       -h|--help)
